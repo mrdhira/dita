@@ -1,0 +1,165 @@
+"""The one-model-at-a-time model manager.
+
+Invariant: at most one engine is resident, always. ``load`` releases the previous engine
+before constructing the next one, so the two never overlap and the memory budget is the
+largest single model rather than the sum.
+
+Downloading happens **outside** the exclusive lock and **before** anything is released, so
+a slow or failing fetch neither blocks in-flight inference nor evicts a working model.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
+
+from . import fetcher
+from .engines import Engine, Result, build_engine
+from .registry import ModelSpec, Registry
+
+LOG = logging.getLogger(__name__)
+
+
+class NoModelLoaded(Exception):
+    """An inference was requested while nothing was resident."""
+
+
+class ModelManager:
+    def __init__(self, registry: Registry, models_dir: Path) -> None:
+        self._registry = registry
+        self._models_dir = models_dir
+
+        # Guards the resident engine and every swap of it. Held only for fast work.
+        self._lock = threading.Lock()
+        # Serialises downloads so two callers cannot fetch the same files at once. Never
+        # held together with _lock, so a download blocks nothing but another download.
+        self._fetch_lock = threading.Lock()
+
+        self._engine: Optional[Engine] = None
+        # One attribute so a lock-free reader can never see a half-updated pair.
+        self._resident: Optional[Tuple[ModelSpec, float]] = None
+        self._loading: Optional[str] = None
+
+    @property
+    def registry(self) -> Registry:
+        return self._registry
+
+    def list(self) -> Dict[str, Any]:
+        return {
+            "models": self._registry.summaries(),
+            "default_model": self._registry.default_model,
+            "resident": self.resident(),
+            "loading": self._loading,
+        }
+
+    def resident(self) -> Optional[Dict[str, Any]]:
+        """The currently loaded model, or None. Lock-free and consistent by construction."""
+        current = self._resident
+        if current is None:
+            return None
+        spec, loaded_at = current
+        return {
+            "id": spec.id,
+            "engine": spec.engine,
+            "langs": list(spec.langs),
+            "resident_seconds": round(time.monotonic() - loaded_at, 3),
+        }
+
+    @property
+    def loading(self) -> Optional[str]:
+        """The model id currently being fetched, if any. Informational."""
+        return self._loading
+
+    def load(self, model_id: str) -> Dict[str, Any]:
+        spec = self._registry.get(model_id)
+        started = time.monotonic()
+
+        already = self._already_resident(spec)
+        if already is not None:
+            return already
+
+        # Phase 1: get the bytes on disk. No exclusive lock, nothing released yet, so the
+        # currently resident model keeps serving and survives a failed fetch untouched.
+        with self._fetch_lock:
+            self._loading = spec.id
+            try:
+                fetcher.ensure_model(self._models_dir, spec)
+            finally:
+                self._loading = None
+
+        # Phase 2: swap. Release first, build second -- the invariant, not an oversight.
+        # A build that fails here leaves nothing resident, which is the honest outcome:
+        # keeping the old engine alive while constructing the new one would mean two
+        # models in memory, and silently rebuilding the old one could fail just as well.
+        with self._lock:
+            already = self._already_resident(spec)
+            if already is not None:
+                return already
+
+            previous = self._resident[0].id if self._resident else None
+            self._release()
+            engine = build_engine(spec.engine, fetcher.model_dir(self._models_dir, spec), spec.options)
+            self._engine = engine
+            self._resident = (spec, time.monotonic())
+
+        load_ms = round((time.monotonic() - started) * 1000, 1)
+        LOG.info("loaded %s in %sms (unloaded %s)", spec.id, load_ms, previous or "nothing")
+        return {
+            "id": spec.id,
+            "engine": spec.engine,
+            "already_resident": False,
+            "load_ms": load_ms,
+            "unloaded": previous,
+        }
+
+    def unload(self) -> Dict[str, Any]:
+        with self._lock:
+            previous = self._resident[0].id if self._resident else None
+            self._release()
+        if previous:
+            LOG.info("unloaded %s", previous)
+        return {"unloaded": previous}
+
+    def infer(self, image_bytes: bytes) -> Dict[str, Any]:
+        if not image_bytes:
+            raise ValueError("infer needs image bytes in the message payload")
+
+        with self._lock:
+            if self._engine is None or self._resident is None:
+                raise NoModelLoaded(
+                    "no model is loaded; send `load` with a model id from `list` before `infer`"
+                )
+            model_id = self._resident[0].id
+            started = time.monotonic()
+            result: Result = self._engine.infer(image_bytes)
+            infer_ms = round((time.monotonic() - started) * 1000, 1)
+
+        payload = result.as_dict()
+        payload["model"] = model_id
+        payload["infer_ms"] = infer_ms
+        return payload
+
+    def _already_resident(self, spec: ModelSpec) -> Optional[Dict[str, Any]]:
+        current = self._resident
+        if current is None or current[0].id != spec.id:
+            return None
+        return {
+            "id": spec.id,
+            "engine": spec.engine,
+            "already_resident": True,
+            "load_ms": 0,
+            "unloaded": None,
+        }
+
+    def _release(self) -> None:
+        """Drop the resident engine. Caller must hold the lock."""
+        if self._engine is not None:
+            try:
+                self._engine.close()
+            except Exception:  # noqa: BLE001 - a failing close must not strand us mid-swap
+                LOG.exception("closing the resident engine failed; dropping the reference anyway")
+        self._engine = None
+        self._resident = None

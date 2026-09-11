@@ -1,2 +1,11 @@
 # Secret / Credentials
 *.env
+
+# Model weights are never committed. They are fetched into a mounted volume at runtime
+# and pinned by each service's models.yaml.
+services/inferences-*/models/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

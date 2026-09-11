@@ -1,0 +1,12 @@
+services:
+  dita-orchestrator-rest:
+    build: 
+      context: ../services/dita-orchestrator
+      dockerfile: Dockerfile
+    container_name: dita-orchestrator-rest
+    ports:
+      - "2104:2104"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    command: ["serveRest"]
+    restart: unless-stopped

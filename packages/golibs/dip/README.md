@@ -31,9 +31,10 @@ back from a live worker.
 | `framing.go` | The prologue, the chunking rule, the ceilings, the error taxonomy, and the dispatch table. |
 | `requester.go` | The requester role: dial, handshake, list, load, unload, infer, and the three health probes. |
 | `receiver.go` | The receiver role, documented and deliberately not implemented — nothing in Go listens yet. |
-| `conformance_test.go` | Reads `framing.json` and `dispatch.json` and asserts every case, in both languages' corpus. |
+| `conformance_test.go` | Reads `framing.json` and `dispatch.json` from the shared corpus and asserts every case. |
+| `responses_test.go` | Reads `responses.json` and decodes every case with the generated types. |
 
-## Three things this package exists to get right
+## Four things this package exists to get right
 
 **One `Write` per datagram, and never over `max_chunk`.** `unixpacket` is `SOCK_SEQPACKET`,
 so the kernel keeps message boundaries — wrapping the connection in a `bufio.Writer` would
@@ -48,11 +49,20 @@ and `fetch_failed` mean retrying the `infer` will not help. `error.message` is p
 A health probe answering `ok: false` is not an error, it is a verdict, and it comes back as
 a `ProbeResponse` with the reasons it failed.
 
+**A failed exchange retires the connection.** There is no request id on this wire, so an
+answer is matched to a question by being next. A call that ends early -- a deadline, a
+cancellation, a short write -- leaves the peer's answer queued on the socket, and reusing
+that connection would return the previous call's result for the current call's question. So
+a failed exchange closes the connection, and every later call on it fails with
+`dip.ErrConnectionRetired`. A refusal carrying an `error.code` is an answer, not a failure,
+and leaves the connection usable. **Retrying means dialling again** — which is the
+orchestrator's job, along with the queue and the budget.
+
 ## Run the tests
 
 ```bash
 make test       # go test ./...
-make coverage   # go test -cover ./...
+make coverage   # coverage, enforced against the floor in the Makefile
 ```
 
 The conformance suite walks up to the repo root to find the corpus, so it runs from

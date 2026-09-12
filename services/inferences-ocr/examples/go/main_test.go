@@ -1,28 +1,39 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // The framing and the ops are the dip package's job and are tested there against the
 // shared corpus. What is left here is the example's own presentation logic, which is what
 // someone copying this file will read first.
 
 func TestEnvOr(t *testing.T) {
+	// env is a pointer so the table can say "set to the empty string", which is a
+	// different case from "not set at all" and the one a container sets by declaring a
+	// variable with no value. A plain string cannot tell them apart.
+	empty := ""
+	socket := "/tmp/a.sock"
 	cases := []struct {
 		name     string
 		key      string
-		env      string
+		env      *string
 		fallback string
 		want     string
 	}{
-		{"unset key falls back", "DIP_EXAMPLE_UNSET", "", "/run/dita/x.sock", "/run/dita/x.sock"},
-		{"set key wins", "DIP_EXAMPLE_SET", "/tmp/a.sock", "/run/dita/x.sock", "/tmp/a.sock"},
-		{"empty value falls back", "DIP_EXAMPLE_EMPTY", "", "/run/dita/x.sock", "/run/dita/x.sock"},
+		{"unset key falls back", "DIP_EXAMPLE_UNSET", nil, "/run/dita/x.sock", "/run/dita/x.sock"},
+		{"set key wins", "DIP_EXAMPLE_SET", &socket, "/run/dita/x.sock", "/tmp/a.sock"},
+		{"empty value falls back", "DIP_EXAMPLE_EMPTY", &empty, "/run/dita/x.sock", "/run/dita/x.sock"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.env != "" {
-				t.Setenv(tc.key, tc.env)
+			if tc.env != nil {
+				t.Setenv(tc.key, *tc.env)
+				if _, set := os.LookupEnv(tc.key); !set {
+					t.Fatalf("%s is not set, so this case is the unset case over again", tc.key)
+				}
 			}
 			if got := envOr(tc.key, tc.fallback); got != tc.want {
 				t.Errorf("envOr(%q, %q) = %q, want %q", tc.key, tc.fallback, got, tc.want)

@@ -393,13 +393,21 @@ func TestRequesterHonoursContext(t *testing.T) {
 		return handshakeResponse()
 	})
 
-	requester, err := Dial(context.Background(), receiver.path)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
+	// One connection per case on purpose: a call that ends on the caller's terms leaves
+	// the peer mid-message, so the exchange retires the connection and reusing it here
+	// would assert the retirement rather than the context.
+	dial := func(t *testing.T) *Requester {
+		t.Helper()
+		requester, err := Dial(context.Background(), receiver.path)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		t.Cleanup(func() { requester.Close() })
+		return requester
 	}
-	defer requester.Close()
 
 	t.Run("a deadline bounds the call", func(t *testing.T) {
+		requester := dial(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		if _, err := requester.Handshake(ctx); err == nil {
@@ -410,6 +418,7 @@ func TestRequesterHonoursContext(t *testing.T) {
 	})
 
 	t.Run("cancellation unblocks a call in flight", func(t *testing.T) {
+		requester := dial(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
 			time.Sleep(50 * time.Millisecond)
@@ -419,6 +428,73 @@ func TestRequesterHonoursContext(t *testing.T) {
 			t.Fatal("expected the call to be cancelled")
 		} else if !errors.Is(err, context.Canceled) {
 			t.Errorf("expected a cancellation error, got: %v", err)
+		}
+	})
+}
+
+// TestAFailedExchangeRetiresTheConnection is the regression test for the worst failure
+// this package can have: not an error, but a wrong answer. A call that gives up on its own
+// deadline leaves the receiver's response in flight, and those datagrams stay queued on the
+// socket. The next call on the same connection reads them and hands back the previous
+// call's result -- one image's text for another image -- with no error anywhere. An
+// orchestrator that retries a timed-out infer is exactly the caller that would see it.
+func TestAFailedExchangeRetiresTheConnection(t *testing.T) {
+	// Long enough that the first caller gives up well before the answer is written, and
+	// short enough that the second case can wait for that answer to land.
+	const answerDelay = 300 * time.Millisecond
+
+	receiver := startReceiver(t, func(op string, control map[string]any, payload []byte) any {
+		if op == "handshake" {
+			return handshakeResponse()
+		}
+		time.Sleep(answerDelay)
+		// The text names the image it came from, so a stale answer is identifiable
+		// rather than merely suspicious.
+		return map[string]any{
+			"ok": true, "text": string(payload), "lines": []map[string]any{},
+			"model": "fake-model", "infer_ms": 1.0,
+		}
+	})
+
+	requester := dialHandshaked(t, receiver)
+
+	t.Run("a call slower than its deadline fails", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), answerDelay/10)
+		defer cancel()
+		if _, err := requester.Infer(ctx, []byte("first image")); err == nil {
+			t.Fatal("expected the call to time out")
+		} else if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("expected a deadline error, got: %v", err)
+		}
+	})
+
+	t.Run("the next call never reads the previous answer", func(t *testing.T) {
+		// Wait for the abandoned response to reach the socket, so the stale datagrams
+		// are really queued: without this the case could pass on timing rather than on
+		// the connection having been retired.
+		time.Sleep(2 * answerDelay)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		result, err := requester.Infer(ctx, []byte("second image"))
+
+		if result != nil && result.Text == "first image" {
+			t.Fatalf("the second image was answered with the first image's text %q", result.Text)
+		}
+		if err == nil {
+			t.Fatalf("expected a refusal from a retired connection, got %+v", result)
+		}
+		if !errors.Is(err, ErrConnectionRetired) {
+			t.Fatalf("expected ErrConnectionRetired, got: %v", err)
+		}
+		if result != nil {
+			t.Errorf("a retired connection must return no response, got %+v", result)
+		}
+	})
+
+	t.Run("closing a retired connection is not an error", func(t *testing.T) {
+		if err := requester.Close(); err != nil {
+			t.Errorf("close: %v", err)
 		}
 	})
 }

@@ -14,6 +14,17 @@ import (
 // tighter bound should say so with a context, which is the only way to get one.
 const defaultCallTimeout = 5 * time.Minute
 
+// ErrConnectionRetired reports a call made on a Requester whose connection a failed
+// exchange has already retired. A DIP connection carries one message at a time with no
+// request id to match an answer to a question, so an exchange that ends early -- a
+// deadline, a cancellation, a short write -- leaves the peer's answer queued on the socket
+// and the two sides disagreeing about which message is next. The only safe reading of that
+// state is that there is no next message: the connection is closed, and every later call
+// fails with this instead of returning some earlier call's answer.
+//
+// A caller that wants to retry after a failure dials again.
+var ErrConnectionRetired = errors.New("connection retired by an earlier failed exchange")
+
 // Requester is the requesting half of DIP: it dials a receiver, sends ops and reads
 // responses. One Requester is one connection, and a connection carries one message at a
 // time, so a Requester is not safe for concurrent use. A caller that wants concurrency
@@ -21,11 +32,20 @@ const defaultCallTimeout = 5 * time.Minute
 //
 // The receiver owns no queue -- it holds one exclusive lock and serialises behind it, so
 // rate limiting, retries, timeouts and backpressure are this side's job.
+//
+// A Requester survives a refusal but not a failed exchange: an error carrying a code is an
+// answer and leaves the connection usable, while a timed-out, cancelled or short exchange
+// retires it. See ErrConnectionRetired. Retrying means dialling again.
 type Requester struct {
 	path   string
 	conn   *net.UnixConn
 	packet *packetConn
 	limits Limits
+	// retired holds the failure that ended the last exchange, wrapping
+	// ErrConnectionRetired. Non-nil means the connection is closed and every later call
+	// fails with it. closed makes Close idempotent, since retiring already closed.
+	retired error
+	closed  bool
 }
 
 // Dial opens a DIP connection to the receiver listening at path. The limits start at
@@ -56,8 +76,15 @@ func Dial(ctx context.Context, path string) (*Requester, error) {
 	}, nil
 }
 
-// Close releases the connection.
-func (r *Requester) Close() error { return r.conn.Close() }
+// Close releases the connection. It is idempotent, so closing a Requester a failed
+// exchange has already retired reports no error.
+func (r *Requester) Close() error {
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	return r.conn.Close()
+}
 
 // Limits reports the limits currently in force: this package's defaults until Handshake
 // has answered, and the peer's own after that.
@@ -77,6 +104,10 @@ func (r *Requester) Call(ctx context.Context, op Op, fields map[string]any, payl
 		control[name] = value
 	}
 	control["op"] = string(op)
+
+	if r.retired != nil {
+		return nil, nil, fmt.Errorf("%s: %w", op, r.retired)
+	}
 
 	stop, err := r.applyDeadline(ctx)
 	if err != nil {
@@ -102,11 +133,32 @@ func (r *Requester) Call(ctx context.Context, op Op, fields map[string]any, payl
 	return body, responsePayload, nil
 }
 
+// exchange writes one message and reads the answer to it. Either half failing desynchronises
+// the connection -- a half-written message the peer is still reading, or an answer left
+// queued on the socket for whoever reads next -- so a failure retires the connection rather
+// than leaving it to look reusable.
 func (r *Requester) exchange(control map[string]any, payload []byte) (json.RawMessage, []byte, error) {
 	if err := writeMessage(r.packet, control, payload, r.limits); err != nil {
-		return nil, nil, err
+		return nil, nil, r.retire(err)
 	}
-	return readMessage(r.packet, r.limits)
+	body, responsePayload, err := readMessage(r.packet, r.limits)
+	if err != nil {
+		return nil, nil, r.retire(err)
+	}
+	return body, responsePayload, nil
+}
+
+// retire closes the connection and records why, then returns cause unchanged: the caller
+// that saw the failure wants to hear about its own deadline or its own short write, and it
+// is the calls after this one that hear ErrConnectionRetired instead. The recorded cause
+// is prose in that message rather than a %w chain, because a later call did not time out --
+// it found a connection that someone else's timeout had already ended.
+func (r *Requester) retire(cause error) error {
+	if r.retired == nil {
+		r.retired = fmt.Errorf("%w: %v", ErrConnectionRetired, cause)
+		_ = r.Close()
+	}
+	return cause
 }
 
 // explain states a failed exchange in the caller's terms. The connection understands only

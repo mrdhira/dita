@@ -268,11 +268,12 @@ func assertResidentSurvived(t *testing.T, body json.RawMessage, decoded any) {
 	}
 }
 
-// assertLoadingSurvived names the field, which is the only thing proving it exists: every
-// case in the corpus carries `loading: null`, and a null the type tags omitempty is
-// exempted from the round trip below, so deleting Loading from the generated type would
-// otherwise be invisible. Naming it makes that deletion a compile error. A case with a
-// non-null loading would be the stronger fix and belongs in the corpus.
+// assertLoadingSurvived names the field, which makes deleting Loading from the generated
+// type a compile error rather than a silent loss: a null the type tags omitempty is
+// exempted from the round trip below, so the cases carrying `loading: null` would not
+// notice on their own. Three corpus cases carry a model id instead -- a handshake, a list
+// and a readyz all taken during a cold load -- and those are where the comparison below
+// has a value to disagree about.
 func assertLoadingSurvived(t *testing.T, body json.RawMessage, decoded *string) {
 	t.Helper()
 	want := bodyField(t, body).Loading

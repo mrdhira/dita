@@ -63,8 +63,7 @@
       "required": [
         "code",
         "message"
-      ],
-      "additionalProperties": false
+      ]
     },
     "ErrorResponse": {
       "title": "ErrorResponse",
@@ -81,8 +80,7 @@
       "required": [
         "ok",
         "error"
-      ],
-      "additionalProperties": false
+      ]
     },
     "Limits": {
       "title": "Limits",
@@ -116,8 +114,7 @@
         "max_payload",
         "idle_timeout_s",
         "message_timeout_s"
-      ],
-      "additionalProperties": false
+      ]
     },
     "Resident": {
       "title": "Resident",
@@ -145,8 +142,7 @@
         "engine",
         "langs",
         "resident_seconds"
-      ],
-      "additionalProperties": false
+      ]
     },
     "HandshakeRequest": {
       "title": "HandshakeRequest",
@@ -229,8 +225,7 @@
         "engines",
         "ops",
         "default_model"
-      ],
-      "additionalProperties": false
+      ]
     },
     "ListRequest": {
       "title": "ListRequest",
@@ -294,8 +289,7 @@
         "files",
         "bytes",
         "unverified_files"
-      ],
-      "additionalProperties": false
+      ]
     },
     "ListResponse": {
       "title": "ListResponse",
@@ -335,8 +329,7 @@
         "ok",
         "models",
         "default_model"
-      ],
-      "additionalProperties": false
+      ]
     },
     "LoadRequest": {
       "title": "LoadRequest",
@@ -394,8 +387,7 @@
         "already_resident",
         "load_ms",
         "unloaded"
-      ],
-      "additionalProperties": false
+      ]
     },
     "UnloadRequest": {
       "title": "UnloadRequest",
@@ -429,8 +421,7 @@
       "required": [
         "ok",
         "unloaded"
-      ],
-      "additionalProperties": false
+      ]
     },
     "InferRequest": {
       "title": "InferRequest",
@@ -478,8 +469,7 @@
         "text",
         "confidence",
         "box"
-      ],
-      "additionalProperties": false
+      ]
     },
     "InferResponse": {
       "title": "InferResponse",
@@ -513,8 +503,7 @@
         "lines",
         "model",
         "infer_ms"
-      ],
-      "additionalProperties": false
+      ]
     },
     "ProbeRequest": {
       "title": "ProbeRequest",
@@ -589,8 +578,7 @@
         "status",
         "uptime_s",
         "reasons"
-      ],
-      "additionalProperties": false
+      ]
     },
     "Point": {
       "title": "Point",

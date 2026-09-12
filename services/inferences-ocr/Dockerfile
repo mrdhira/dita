@@ -64,7 +64,8 @@ RUN mkdir -p "$MODELS_DIR" "$(dirname "$SOCKET_PATH")" \
 
 USER ocr
 
-# An exec probe: this service has no HTTP surface.
+# An exec probe, not a curl of /metrics: health is a DIP op, so it reads the same
+# process state the workload does and does not depend on the metrics port.
 HEALTHCHECK --start-period=30s --interval=30s --timeout=10s --retries=3 \
     CMD ["python", "-m", "ocr_worker", "--probe", "ready"]
 

@@ -29,8 +29,18 @@ but the two things below.
 | `cli.py` | the flags, the env vars, `--probe`, and the serve loop |
 | `metrics.py` | the Prometheus counters and the small HTTP port that serves them |
 
-What is **not** here is any knowledge of a model format, a media type or an engine. The
-package never names an engine; it is handed a factory and calls it.
+The package never names an engine: it is handed a factory and calls it. It holds no
+knowledge of a model format, a media type, or how any engine works.
+
+**It does hold one piece of model-output knowledge, and it is OCR's.** `Result(text, lines)`
+with `Line(text, confidence, box)` and a four-corner box is the only result shape there is,
+and `InferResponse` in the IDL closes it with `additionalProperties: false`. A speech worker
+can return a transcript — one `Line`, null `box`, as the example below does — but it cannot
+carry segments or per-word timestamps without changing the schema and regenerating both
+languages. That is a protocol decision rather than an oversight, and it is
+[an open question](../../../docs/inferences/ocr/%5B1%5Dtechnical-requirement.md#open-questions)
+rather than a settled design. A degenerate STT worker is an engine and a manifest; a useful
+one needs the response shape widened first.
 
 ## Writing a worker
 
@@ -84,7 +94,8 @@ worker, and copy it.
 `--socket` (`$SOCKET_PATH`), `--models-dir` (`$MODELS_DIR`), `--registry`
 (`$MODELS_REGISTRY`), `--preload <id>` (`$PRELOAD_MODEL`), `--log-level`, `--version`, and
 `--probe live|ready|startup` — a one-shot health check that exits 0 or 1, which is what a
-container `HEALTHCHECK` execs for a service with no HTTP surface.
+container `HEALTHCHECK` execs. It is not a curl of `/metrics`: health is a DIP op, so
+it answers from the same state the workload does.
 
 Exit codes: `2` the registry would not parse, `3` the socket directory cannot be used.
 

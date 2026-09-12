@@ -133,10 +133,12 @@ help, so retry the `load` or choose another model.
 
 ## Health
 
-Three ops, not three URL paths, because there is no HTTP surface and adding one purely for
-probes would mean a listener, a parser and a second transport to secure. The names follow the
-Kubernetes convention so the semantics are the familiar ones; `healthz` is deprecated there
-and is not offered here.
+Three ops, not three URL paths. A worker may serve HTTP elsewhere -- the reference
+implementation exposes Prometheus metrics on a port of its own -- but health belongs on the
+workload transport: a probe that answers from the same process state the requests do cannot
+say "ready" while the socket is wedged, and a metrics port that is down cannot make a healthy
+worker look dead. The names follow the Kubernetes convention so the semantics are the
+familiar ones; `healthz` is deprecated there and is not offered here.
 
 | probe | true when | false means |
 | --- | --- | --- |
@@ -206,6 +208,16 @@ the one place tolerance is correct, and it is the opposite of the rule for reque
 where the receiver refuses what it does not declare. The asymmetry is deliberate: a receiver
 that tolerates unknown request fields hides client bugs, while a requester that refuses
 unknown response fields cannot be upgraded independently.
+
+**The IDL says the same thing.** Request types and the prologue carry
+`additionalProperties: false`, so a receiver generated from the schema refuses what it does
+not declare. Response types do not, so a requester tolerates a field a newer receiver added.
+The two halves of the asymmetry are expressed where they are enforced.
+
+One deliberate exception, in the tests rather than at runtime: the conformance readers
+decode `responses.json` strictly and fail on an undeclared field. That is not runtime
+tolerance, it is drift detection — a corpus body carrying a field the schema does not define
+means the corpus and the IDL disagree, and the whole point of the corpus is to notice.
 
 ## The IDL and code generation
 

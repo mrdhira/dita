@@ -49,10 +49,11 @@ services:
     # The image's non-root user is uid 10001. Run as the invoking user instead so the
     # bind-mounted repo directories stay writable and the files it fetches stay yours.
     user: "${UID:-1000}:${GID:-1000}"
-    # An exec probe, not an HTTP one: this service has no HTTP surface and is not getting
-    # a TCP listener just for health. `readyz` stays true through a cold model load -- a
-    # load in flight is progress, not a wedge -- so the long start_period only has to
-    # cover process start and the socket bind.
+    # An exec probe, not an HTTP one. The worker does serve HTTP for metrics, but health
+    # is a DIP op: the probe and the workload then answer from the same process state, and
+    # a metrics port that is down cannot make a healthy worker look dead. `readyz` stays
+    # true through a cold model load -- a load in flight is progress, not a wedge -- so the
+    # long start_period only has to cover process start and the socket bind.
     healthcheck:
       test: ["CMD", "python", "-m", "ocr_worker", "--probe", "ready"]
       start_period: 30s

@@ -81,7 +81,8 @@ def run_probe(socket_path: Path, probe: str) -> int:
     """Ask a running worker one health question over its own socket.
 
     Deliberately tiny and dependency-free: a container healthcheck is an exec probe for a
-    service with no HTTP surface, so this has to work with nothing but the stdlib.
+    service whose health lives on the DIP socket rather than on the metrics port, so this
+    has to work with nothing but the stdlib.
     """
     op = PROBES[probe]
     try:

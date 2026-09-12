@@ -366,7 +366,7 @@ without running `make lock` and the image build fails. Note that `--frozen` is *
 flag for this — it refuses to update the lock but does not check it, and will export a stale
 one and exit 0.
 
-26 tests here, and 51 in [`packages/pylibs/dita-worker`](../../packages/pylibs/dita-worker/README.md#tests)
+26 tests here, and 60 in [`packages/pylibs/dita-worker`](../../packages/pylibs/dita-worker/README.md#tests)
 over the framework this service used to contain. The two levels are described in full in the
 [technical requirement](../../docs/inferences/ocr/%5B1%5Dtechnical-requirement.md#testing).
 

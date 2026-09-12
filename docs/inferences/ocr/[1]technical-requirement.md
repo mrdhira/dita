@@ -148,7 +148,8 @@ adapter. Nothing in the framework knows an OCR engine exists, which is what make
 
 **The dependency model** is the fourth piece of committed state, and it is repo-wide rather
 than service-local. The root `pyproject.toml` is a **virtual uv workspace root** — no
-`[project]` table, only `[tool.uv.workspace]` with `members = ["services/inferences-*"]` — so
+`[project]` table, only `[tool.uv.workspace]` with
+`members = ["services/*", "packages/pylibs/*"]` — so
 every Python service resolves together into a single `uv.lock` at the repo root. Bounds are
 declared per service (`services/inferences-ocr/pyproject.toml`); exact versions and hashes
 live only in the lock. There is no `requirements.txt`.
@@ -234,7 +235,7 @@ pre/post asymmetry: same operation, different side of the library boundary.
 | Digest or size mismatch | `checksum_mismatch` | Unchanged; the bad file is deleted, never loaded. |
 | Engine construction fails after a good fetch | the underlying error as `internal` | **Nothing resident.** Deliberate: the old engine was already released, and keeping it alive would break the invariant. `readyz` goes false. |
 | `infer` with nothing resident | `no_model_loaded` | Unchanged. |
-| Response over `max_control` | `response_too_large` | Connection stays open; the peer gets a code, not an EOF. |
+| Response over `max_control` | `response_too_large` | The peer gets a code rather than an EOF, then the connection closes: a partial response has already gone out, so the stream cannot be trusted to resynchronise. |
 | Peer stalls mid-message | `timeout`, then the connection closes | The thread and its buffers are released. |
 | 17th concurrent connection | `busy`, then close after a drain window | Unchanged. |
 | Socket directory unwritable at boot | process exits 3 with a remediation message | Not serving. `startupz` would be false. |
@@ -252,8 +253,11 @@ pre/post asymmetry: same operation, different side of the library boundary.
 - `startupz` — one-time boot work finished: socket bound, registry parsed. False ⇒ **do not
   kill me, I am still booting**.
 
-Because there is no HTTP surface, these are protocol ops, and a container healthcheck is an
-exec probe: `python -m ocr_worker --probe ready`, exiting 0 or 1.
+These are protocol ops rather than URL paths, and a container healthcheck is an exec
+probe: `python -m ocr_worker --probe ready`, exiting 0 or 1. The worker does serve HTTP for
+metrics (see Observability), but health stays on the workload transport so a probe reads the
+same state a request would, and so a metrics port being down cannot make a healthy worker
+look dead.
 
 ## Alternatives considered
 
@@ -528,12 +532,17 @@ against uv: a service depends on a workspace member by name and declares
 `[tool.uv.sources] <name> = { workspace = true }`. It resolves into the same root `uv.lock`
 as `source = { editable = "packages/<name>" }` — no version pinning, and edits are live
 because it is installed editable. Services themselves stay `package = false` and appear as
-`virtual`; only real shared packages are installable. **The extraction is a follow-up**: the
-protocol, the registry and the fetcher are the obvious candidates, but nothing moves until a
-second worker exists to share them with, because one caller is not yet a pattern.
+`virtual`; only real shared packages are installable. **The extraction has happened**: the
+protocol lives in `packages/{golibs,pylibs}/dip` and everything a worker does except the
+inference lives in `packages/pylibs/dita-worker`. It was done with one caller to migrate
+rather than three to reconcile.
 
 ## Open questions
 
-- [ ] **Q:** Where do metrics go, given there is deliberately no HTTP endpoint here? Dhira
-  has asked for a recommendation; none is offered yet, so this stays open. — *owner:* Dhira
-  — *needed by:* the first dashboard.
+Metrics are settled: the worker serves Prometheus text on a small HTTP port of its own,
+scraped by an opt-in VictoriaMetrics stack. The reasoning is in Observability above.
+
+- [ ] **Q:** `InferResponse` is OCR-shaped — `lines` with a four-corner `box`, and
+  `additionalProperties: false` — so a speech worker cannot carry segments or timestamps
+  without a schema change. What shape should a generalised inference response take? See
+  "The STT seam" below. — *owner:* Dhira — *needed by:* `inferences-stt`.

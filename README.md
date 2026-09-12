@@ -167,9 +167,15 @@ shape the orchestrator's client will take.
 
 Design documents live under `docs/`, one directory per service:
 
+- [`docs/protocol/[1]dip-specification.md`](docs/protocol/%5B1%5Ddip-specification.md)
+  — DIP: what it is, why it is a new protocol rather than gRPC or HTTP, the framing, the ops
+  and the versioning rules.
+- [`docs/protocol/[2]open-questions.md`](docs/protocol/%5B2%5Dopen-questions.md)
+  — two decisions waiting on Dhira: how far the response shape should generalise beyond OCR,
+  and what a minimal CI gate would need.
 - [`docs/inferences/ocr/[1]technical-requirement.md`](docs/inferences/ocr/%5B1%5Dtechnical-requirement.md)
-  — the OCR worker: context, the wire protocol, the per-engine pipeline boundaries, the
-  alternatives that lost, and the rollout.
+  — the OCR worker: context, the per-engine pipeline boundaries, the alternatives that lost,
+  the metrics contract, and the rollout.
 
 ## Repo conventions
 
@@ -191,8 +197,9 @@ Coverage is reported per unit, against that unit's own code, in both languages. 
 number would let a well-tested unit hide an untested one.
 
 Working notes and plans live under `.claude/tasks/`; anything durable graduates to `docs/`.
-Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under
-`.claude/rules/` are still empty.
+Agent guidance is in [`AGENTS.md`](AGENTS.md), with the per-language rules in
+[`.claude/rules/`](.claude/rules/) — Python, Go and QA — and the subagents that read them in
+[`.claude/agents/`](.claude/agents/).
 
 ## Python dependencies
 

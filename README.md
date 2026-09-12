@@ -41,6 +41,10 @@ It checks every tool and its version, that the Docker daemon is reachable, and t
 `uv.lock` is in sync. Each failure prints the exact install command for the OS you are on,
 and it exits non-zero, so it also works as a CI gate.
 
+Python is the one tool asdf does not have to provide: uv provisions the interpreter for the
+workspace, so `doctor` asks uv what this repo would run rather than reading whatever
+`python3` happens to be first on your PATH. If it is missing, `uv python install 3.14`.
+
 ```bash
 make test        # every service's tests
 make coverage    # every service's coverage, reported per service

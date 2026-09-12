@@ -51,12 +51,29 @@ UV_HAVE=$(command -v uv >/dev/null 2>&1 && uv --version 2>/dev/null | awk '{prin
 [ "$UV_HAVE" = "$UV_WANT" ] && m=yes || m=no
 check uv uv "$UV_WANT" "$UV_HAVE" "$m"
 
-# Services declare requires-python >=3.14; the patch in .tool-versions is for local tooling,
-# so the minor is what has to match.
-PY_WANT=$(pinned python)
-PY_HAVE=$(command -v python3 >/dev/null 2>&1 && python3 --version 2>/dev/null | awk '{print $2}')
-case "$PY_HAVE" in 3.14.*) m=yes ;; *) m=no ;; esac
-check python python "${PY_WANT%.*}.x" "$PY_HAVE" "$m"
+# The interpreter that runs this repo is the one uv provisions for the workspace, not
+# whatever `python3` is on PATH -- that one is never used here. Services declare
+# requires-python >=3.14 and the runtime image is python:3.14-slim-trixie.
+if [ -z "$UV_HAVE" ]; then
+    fail python "skipped, uv provisions it and uv is missing" "install uv first"
+else
+    # Use the existing workspace venv when there is one; otherwise ask uv what it would
+    # resolve, so a cold machine is not told to install 300 MB of packages to answer.
+    if [ -d "$ROOT/.venv" ]; then
+        PY_HAVE=$(cd "$ROOT" && uv run --frozen --no-sync python -V 2>/dev/null | awk '{print $2}')
+        PY_VIA="workspace venv"
+    else
+        PY_PATH=$(cd "$ROOT" && uv python find 3.14 2>/dev/null)
+        PY_HAVE=""
+        [ -x "$PY_PATH" ] && PY_HAVE=$("$PY_PATH" -V 2>/dev/null | awk '{print $2}')
+        PY_VIA="uv, no venv yet"
+    fi
+    case "$PY_HAVE" in
+        3.14.*) pass python "$PY_HAVE ($PY_VIA)" ;;
+        "")     fail python "uv has no 3.14 interpreter for this workspace" "uv python install 3.14" ;;
+        *)      fail python "uv resolves $PY_HAVE, expected 3.14.x" "uv python install 3.14" ;;
+    esac
+fi
 
 GO_WANT=$(pinned golang)
 GO_HAVE=$(command -v go >/dev/null 2>&1 && go version 2>/dev/null | awk '{print $3}' | sed 's/^go//')

@@ -92,3 +92,24 @@ validator that rejected every real OCR response with `field box[0] length: must 
 The framing and dispatch corpora both passed, because neither decodes a response with the
 generated types. Only a live cross-language run caught it. A named `Point` definition
 generates correctly, and `responses.json` now guards it.
+
+### Extract shared code before the second caller exists, not after
+
+When a second service is planned, move the shared parts while there is still one caller to
+migrate.
+
+**Why:** the OCR worker's socket server, manager, registry and fetcher were about to be
+copied into `-stt` and `-tts`. Extracting them with one caller meant one migration and one
+test split; extracting them after three would have meant reconciling three drifted copies.
+The test that the split is real is executable: build a whole worker from the package with a
+fake engine and drive it over a real socket, importing nothing from any service.
+
+### A "no HTTP" rule is about the hot path, not about the word HTTP
+
+Ask what the traffic is before applying it.
+
+**Why:** DIP is a unix socket because it carries megabytes on the request path, where an
+HTTP parser and a framing library would be a dependency bought for nothing. Metrics are
+kilobytes on a timer and every collector already speaks HTTP, so serving them over
+`http.server` costs no dependency and saves inventing a scrape protocol. Same repo,
+opposite answers, because the question was different.

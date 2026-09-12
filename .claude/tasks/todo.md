@@ -34,9 +34,9 @@ implementations that agree today.
 
 ## Order C — worker kit refactor + metrics
 
-- [ ] C1. Extract the reusable worker parts into `packages/pylibs/`.
-- [ ] C2. `services/inferences-ocr` becomes a thin engine layer over the kit.
-- [ ] C3. The worker serves `/metrics` on its own small HTTP port.
+- [x] C1. Extract the reusable worker parts into `packages/pylibs/`.
+- [x] C2. `services/inferences-ocr` becomes a thin engine layer over the kit.
+- [x] C3. The worker serves `/metrics` on its own small HTTP port.
 
 ## Verification — every order
 
@@ -49,6 +49,19 @@ implementations that agree today.
 ## Review section
 
 _(filled in at the end of each order: what changed, evidence, anything flagged)_
+
+### Order C
+
+Done. `packages/pylibs/dita-worker` holds everything a worker does except the inference;
+`services/inferences-ocr` is three adapters, a manifest and a 36-line entrypoint. The seam
+is proved by a test that builds a whole worker from a fake engine and drives it over a real
+socket, importing nothing from any service.
+
+Metrics are Prometheus text on the worker's own small HTTP port, loopback by default. Every
+counter was checked live: after one session the numbers matched the work exactly, and a cold
+load moved `fetched_bytes_total` to the byte count `models.yaml` pins. VictoriaMetrics is
+opt-in behind a compose profile and scraped it successfully; port 9109 stays unreachable
+from the host.
 
 ### Order B
 

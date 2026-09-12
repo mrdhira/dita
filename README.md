@@ -14,10 +14,37 @@ nothing else.
 | `services/inferences-stt` | Python | Speech to text. | placeholder |
 | `services/inferences-tts` | Python | Text to speech. | placeholder |
 
-Shared Go packages live under `packages/`. Deployment lives in
+Shared packages live under `packages/`. Deployment lives in
 [`deployment/docker-compose.yml`](deployment/docker-compose.yml).
 
+## Getting set up
+
+Linux and macOS. Toolchain versions are pinned in [`.tool-versions`](.tool-versions) and
+installed with [asdf](https://asdf-vm.com), which works the same on both:
+
 ```bash
+asdf plugin add golang && asdf plugin add python && asdf plugin add uv
+asdf install                      # reads .tool-versions
+```
+
+On macOS, Homebrew is a fine substitute for any of them (`brew install uv`, and
+`brew install --cask docker` for Docker Desktop). Docker on Linux follows
+[the upstream instructions](https://docs.docker.com/engine/install/).
+
+Then ask the repo whether the machine is ready:
+
+```bash
+make doctor
+```
+
+It checks every tool and its version, that the Docker daemon is reachable, and that
+`uv.lock` is in sync. Each failure prints the exact install command for the OS you are on,
+and it exits non-zero, so it also works as a CI gate.
+
+```bash
+make test        # every service's tests
+make coverage    # every service's coverage, reported per service
+make build       # every service image
 docker compose -f deployment/docker-compose.yml up --build
 ```
 
@@ -71,10 +98,20 @@ Design documents live under `docs/`, one directory per service:
 
 ## Repo conventions
 
+**Context stays where it belongs.** A service owns its own README, Makefile, tests,
+`pyproject.toml` and Dockerfile under `services/<name>/`; a shared package owns the same
+under `packages/<name>/`; their design documents live under `docs/<area>/<name>/`. Nothing
+at the root accumulates service-specific detail.
+
+**Make is two layers.** The root [`Makefile`](Makefile) is repo-level only — `doctor`,
+`test`, `coverage`, `build`, `lock` — and delegates the rest to each service's own
+Makefile, which owns `test`, `coverage`, `run` and `image`. Coverage is reported per
+service, against that service's own code: one blended number would let a well-tested
+service hide an untested one.
+
 Working notes and plans live under `.claude/tasks/`; anything durable graduates to `docs/`.
 Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under
-`.claude/rules/` are still empty. Repo-level tasks are in the [`Makefile`](Makefile)
-(`make build`, `make test`, `make coverage`, `make lock`, `make lock-check`).
+`.claude/rules/` are still empty.
 
 **Python dependencies are one uv workspace.** The root `pyproject.toml` is a virtual
 workspace root and every service under `services/inferences-*` resolves into the single

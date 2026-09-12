@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dita.mrdhira.dev/specs/dip/dip.schema.json",
+  "title": "DIP",
+  "description": "Dita Inference Protocol, version dip/2. Language-neutral source of truth for every control block and response on the wire. Prose specification: docs/protocol/[1]dip-specification.md",
+  "type": "object",
+  "$defs": {
+    "Prologue": {
+      "title": "Prologue",
+      "description": "First datagram of every message. Small and fixed-shape, so it always fits in one datagram no matter how large the message is.",
+      "type": "object",
+      "properties": {
+        "protocol": {"type": "integer", "description": "Wire version. 2 is dip/2."},
+        "control_len": {"type": "integer", "minimum": 1, "description": "Bytes of UTF-8 JSON control block that follow."},
+        "payload_len": {"type": "integer", "minimum": 0, "description": "Bytes of opaque payload that follow the control block."}
+      },
+      "required": ["control_len", "payload_len"],
+      "additionalProperties": false
+    },
+
+    "ErrorCode": {
+      "title": "ErrorCode",
+      "description": "The stable half of a failure. Branch on this, never on the message.",
+      "type": "string",
+      "enum": [
+        "bad_request",
+        "unknown_model",
+        "unsupported_engine",
+        "checksum_mismatch",
+        "fetch_failed",
+        "no_model_loaded",
+        "timeout",
+        "busy",
+        "response_too_large",
+        "internal"
+      ]
+    },
+
+    "ErrorBody": {
+      "title": "ErrorBody",
+      "type": "object",
+      "properties": {
+        "code": {"$ref": "#/$defs/ErrorCode"},
+        "message": {"type": "string", "description": "Prose for humans and logs. Not a contract."}
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    },
+
+    "ErrorResponse": {
+      "title": "ErrorResponse",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean", "const": false},
+        "error": {"$ref": "#/$defs/ErrorBody"}
+      },
+      "required": ["ok", "error"],
+      "additionalProperties": false
+    },
+
+    "Limits": {
+      "title": "Limits",
+      "description": "Everything a peer needs to frame correctly. Advertised by handshake so nothing is hard-coded.",
+      "type": "object",
+      "properties": {
+        "max_chunk": {"type": "integer", "description": "Largest datagram either side may send."},
+        "max_control": {"type": "integer", "description": "Largest control block."},
+        "max_payload": {"type": "integer", "description": "Largest payload."},
+        "idle_timeout_s": {"type": "integer", "description": "How long an open connection may sit between messages."},
+        "message_timeout_s": {"type": "integer", "description": "How long a half-sent message may stall."}
+      },
+      "required": ["max_chunk", "max_control", "max_payload", "idle_timeout_s", "message_timeout_s"],
+      "additionalProperties": false
+    },
+
+    "Resident": {
+      "title": "Resident",
+      "description": "The model that can answer infer right now. Null when nothing is loaded.",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "engine": {"type": "string"},
+        "langs": {"type": "array", "items": {"type": "string"}},
+        "resident_seconds": {"type": "number"}
+      },
+      "required": ["id", "engine", "langs", "resident_seconds"],
+      "additionalProperties": false
+    },
+
+    "HandshakeRequest": {
+      "title": "HandshakeRequest",
+      "type": "object",
+      "properties": {"op": {"type": "string", "enum": ["handshake", "version"]}},
+      "required": ["op"],
+      "additionalProperties": false
+    },
+
+    "HandshakeResponse": {
+      "title": "HandshakeResponse",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean", "const": true},
+        "service": {"type": "string"},
+        "version": {"type": "string", "description": "Implementation version, not the wire version."},
+        "protocol": {"type": "integer", "description": "Wire version the peer speaks."},
+        "limits": {"$ref": "#/$defs/Limits"},
+        "engines": {"type": "array", "items": {"type": "string"}},
+        "ops": {"type": "array", "items": {"type": "string"}},
+        "default_model": {"type": "string"},
+        "resident": {"oneOf": [{"$ref": "#/$defs/Resident"}, {"type": "null"}]},
+        "loading": {"type": ["string", "null"], "description": "Model being fetched, if any."}
+      },
+      "required": ["ok", "service", "version", "protocol", "limits", "engines", "ops", "default_model"],
+      "additionalProperties": false
+    },
+
+    "ListRequest": {
+      "title": "ListRequest",
+      "type": "object",
+      "properties": {"op": {"type": "string", "const": "list"}},
+      "required": ["op"],
+      "additionalProperties": false
+    },
+
+    "ModelSummary": {
+      "title": "ModelSummary",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "description": {"type": "string"},
+        "engine": {"type": "string"},
+        "langs": {"type": "array", "items": {"type": "string"}},
+        "source_type": {"type": "string", "enum": ["huggingface", "system"]},
+        "files": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "unverified_files": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["id", "description", "engine", "langs", "source_type", "files", "bytes", "unverified_files"],
+      "additionalProperties": false
+    },
+
+    "ListResponse": {
+      "title": "ListResponse",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean", "const": true},
+        "models": {"type": "array", "items": {"$ref": "#/$defs/ModelSummary"}},
+        "default_model": {"type": "string"},
+        "resident": {"oneOf": [{"$ref": "#/$defs/Resident"}, {"type": "null"}]},
+        "loading": {"type": ["string", "null"]}
+      },
+      "required": ["ok", "models", "default_model"],
+      "additionalProperties": false
+    },
+
+    "LoadRequest": {
+      "title": "LoadRequest",
+      "description": "id is canonical; model is accepted as an alias and is the only op where that field is meaningful.",
+      "type": "object",
+      "properties": {
+        "op": {"type": "string", "const": "load"},
+        "id": {"type": "string"},
+        "model": {"type": "string"}
+      },
+      "required": ["op"],
+      "additionalProperties": false
+    },
+
+    "LoadResponse": {
+      "title": "LoadResponse",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean", "const": true},
+        "id": {"type": "string"},
+        "engine": {"type": "string"},
+        "already_resident": {"type": "boolean"},
+        "load_ms": {"type": "number"},
+        "unloaded": {"type": ["string", "null"], "description": "What this load evicted. Always present."}
+      },
+      "required": ["ok", "id", "engine", "already_resident", "load_ms", "unloaded"],
+      "additionalProperties": false
+    },
+
+    "UnloadRequest": {
+      "title": "UnloadRequest",
+      "type": "object",
+      "properties": {"op": {"type": "string", "const": "unload"}},
+      "required": ["op"],
+      "additionalProperties": false
+    },
+
+    "UnloadResponse": {
+      "title": "UnloadResponse",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean", "const": true},
+        "unloaded": {"type": ["string", "null"]}
+      },
+      "required": ["ok", "unloaded"],
+      "additionalProperties": false
+    },
+
+    "InferRequest": {
+      "title": "InferRequest",
+      "description": "Takes no model field. Load first, unload after, so which model answered is never in doubt. The image rides in the payload, not here.",
+      "type": "object",
+      "properties": {"op": {"type": "string", "const": "infer"}},
+      "required": ["op"],
+      "additionalProperties": false
+    },
+
+    "Line": {
+      "title": "Line",
+      "type": "object",
+      "properties": {
+        "text": {"type": "string"},
+        "confidence": {"type": ["number", "null"], "description": "0..1, or null when the engine does not report one."},
+        "box": {
+          "type": ["array", "null"],
+          "description": "Four [x, y] corners in source pixels, clockwise from top-left. Null for engines that do not localise text.",
+          "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "required": ["text", "confidence", "box"],
+      "additionalProperties": false
+    },
+
+    "InferResponse": {
+      "title": "InferResponse",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean", "const": true},
+        "text": {"type": "string", "description": "The lines joined with newlines."},
+        "lines": {"type": "array", "items": {"$ref": "#/$defs/Line"}},
+        "model": {"type": "string", "description": "Which model actually answered."},
+        "infer_ms": {"type": "number"}
+      },
+      "required": ["ok", "text", "lines", "model", "infer_ms"],
+      "additionalProperties": false
+    },
+
+    "ProbeRequest": {
+      "title": "ProbeRequest",
+      "type": "object",
+      "properties": {"op": {"type": "string", "enum": ["livez", "readyz", "startupz"]}},
+      "required": ["op"],
+      "additionalProperties": false
+    },
+
+    "ProbeResponse": {
+      "title": "ProbeResponse",
+      "description": "resident and loading are present on readyz only.",
+      "type": "object",
+      "properties": {
+        "ok": {"type": "boolean"},
+        "probe": {"type": "string", "enum": ["livez", "readyz", "startupz"]},
+        "status": {"type": "string", "enum": ["pass", "fail"]},
+        "uptime_s": {"type": "number"},
+        "reasons": {"type": "array", "items": {"type": "string"}},
+        "resident": {"oneOf": [{"$ref": "#/$defs/Resident"}, {"type": "null"}]},
+        "loading": {"type": ["string", "null"]}
+      },
+      "required": ["ok", "probe", "status", "uptime_s", "reasons"],
+      "additionalProperties": false
+    }
+  }
+}

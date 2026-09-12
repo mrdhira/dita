@@ -1,0 +1,13 @@
+# Targets are compose service names on the default network; no port is published.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: inferences-ocr
+    static_configs:
+      - targets: ["inferences-ocr:9109"]
+        labels:
+          service: inferences-ocr
+          kind: worker
+
+  # Add a job here when the Go orchestrator exposes /metrics; nothing else changes.

@@ -4,6 +4,7 @@ requires-python = ">=3.14.6"
 
 [manifest]
 members = [
+    "dip",
     "inferences-ocr",
 ]
 
@@ -207,6 +208,21 @@ wheels = [
 ]
 
 [[package]]
+name = "dip"
+version = "0.1.0"
+source = { editable = "packages/pylibs/dip" }
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.6,<8" }]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -228,6 +244,7 @@ name = "inferences-ocr"
 version = "0.1.0"
 source = { virtual = "services/inferences-ocr" }
 dependencies = [
+    { name = "dip" },
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "opencv-python" },
@@ -243,6 +260,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dip", editable = "packages/pylibs/dip" },
     { name = "numpy", specifier = ">=2.5,<3" },
     { name = "onnxruntime", specifier = ">=1.30,<2" },
     { name = "opencv-python", specifier = ">=5.0,<6" },

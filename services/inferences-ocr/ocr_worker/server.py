@@ -15,11 +15,13 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import __version__, protocol
+import dip
+from dip import ErrorCode, error, ok
+
+from . import __version__
 from .engines import ENGINE_NAMES, UnknownEngine
 from .fetcher import ChecksumError, FetchError
 from .manager import ModelManager, NoModelLoaded
-from .protocol import PeerGone, ProtocolError, Timeout, error, ok
 from .registry import RegistryError
 
 LOG = logging.getLogger(__name__)
@@ -102,23 +104,12 @@ LISTEN_BACKLOG = 16
 # Live connections, not just queued ones. Each holds a thread and, mid-message, its
 # buffered chunks; the container has a hard memory limit.
 MAX_CONNECTIONS = 16
-# How long to let a refused peer read its `busy` answer before hanging up. Closing a
-# SOCK_SEQPACKET socket with data still queued resets it, and the peer would see a bare
-# ECONNRESET instead of the error code.
-REFUSAL_DRAIN_SECONDS = 0.5
 
 # Kubernetes-shaped probe names, mapped to the Health method that answers them.
 PROBE_OPS = {"livez": "live", "readyz": "ready", "startupz": "startup"}
+# What this worker implements, which is what `handshake` advertises. Which fields each op
+# declares, and the refusal of anything else, belong to the protocol: `dip.validate`.
 KNOWN_OPS = ("handshake", "version", "list", "load", "unload", "infer", *PROBE_OPS)
-
-# Fields each op accepts besides `op`. Anything else is refused rather than ignored: a
-# caller who sends `model` to `infer` has the wrong model in mind, and silently running
-# the resident one would answer the wrong question.
-OP_FIELDS = {"load": frozenset({"id", "model"})}
-INFER_MODEL_HINT = (
-    "infer takes no `model` field: `load` the model first and `unload` when done, "
-    "so which model answered is never in doubt"
-)
 
 
 def dispatch(
@@ -131,18 +122,16 @@ def dispatch(
     op = control.get("op")
 
     try:
-        unexpected = sorted(set(control) - {"op"} - OP_FIELDS.get(op, frozenset()))
-        if unexpected and op in KNOWN_OPS:
-            if op == "infer" and "model" in unexpected:
-                return error("bad_request", INFER_MODEL_HINT)
-            return error("bad_request", f"{op} takes no {', '.join(repr(f) for f in unexpected)} field")
+        refusal = dip.validate(control)
+        if refusal is not None:
+            return refusal
 
         if op in ("handshake", "version"):
             return ok(
                 service=SERVICE_NAME,
                 version=__version__,
-                protocol=protocol.PROTOCOL_VERSION,
-                limits=protocol.limits(),
+                protocol=dip.PROTOCOL_VERSION,
+                limits=dip.limits(),
                 engines=list(ENGINE_NAMES),
                 ops=list(KNOWN_OPS),
                 default_model=manager.registry.default_model,
@@ -155,34 +144,30 @@ def dispatch(
         if op == "list":
             return ok(**manager.list())
         if op == "load":
-            model_id = control.get("id") or control.get("model")
-            if not model_id:
-                return error("bad_request", "load needs an `id`")
-            return ok(**manager.load(str(model_id)))
+            return ok(**manager.load(str(control.get("id") or control.get("model"))))
         if op == "unload":
             return ok(**manager.unload())
         if op == "infer":
             return ok(**manager.infer(payload))
-        return error(
-            "bad_request",
-            f"unknown op {op!r}; expected one of {', '.join(KNOWN_OPS)}",
-        )
+        # Unreachable while KNOWN_OPS matches dip.OPS; reached the day the protocol
+        # declares an op this worker has not implemented yet.
+        return error(ErrorCode.internal, f"op {op!r} is declared but not implemented here")
 
     except RegistryError as exc:
-        return error("unknown_model", str(exc))
+        return error(ErrorCode.unknown_model, str(exc))
     except UnknownEngine as exc:
-        return error("unsupported_engine", str(exc))
+        return error(ErrorCode.unsupported_engine, str(exc))
     except ChecksumError as exc:
-        return error("checksum_mismatch", str(exc))
+        return error(ErrorCode.checksum_mismatch, str(exc))
     except FetchError as exc:
-        return error("fetch_failed", str(exc))
+        return error(ErrorCode.fetch_failed, str(exc))
     except NoModelLoaded as exc:
-        return error("no_model_loaded", str(exc))
+        return error(ErrorCode.no_model_loaded, str(exc))
     except ValueError as exc:
-        return error("bad_request", str(exc))
+        return error(ErrorCode.bad_request, str(exc))
     except Exception as exc:  # noqa: BLE001 - one bad request must not kill the worker
         LOG.exception("op %r failed", op)
-        return error("internal", f"{type(exc).__name__}: {exc}")
+        return error(ErrorCode.internal, f"{type(exc).__name__}: {exc}")
 
 
 class SocketServer:
@@ -190,8 +175,8 @@ class SocketServer:
         self,
         manager: ModelManager,
         socket_path: Path,
-        idle_timeout: float = protocol.IDLE_TIMEOUT,
-        message_timeout: float = protocol.MESSAGE_TIMEOUT,
+        idle_timeout: float = dip.IDLE_TIMEOUT,
+        message_timeout: float = dip.MESSAGE_TIMEOUT,
     ) -> None:
         self._manager = manager
         self._socket_path = socket_path
@@ -205,7 +190,7 @@ class SocketServer:
     def serve_forever(self) -> None:
         self._sock = self._bind()
         self.health.mark_bound()
-        LOG.info("listening on %s (SOCK_SEQPACKET, protocol %d)", self._socket_path, protocol.PROTOCOL_VERSION)
+        LOG.info("listening on %s (SOCK_SEQPACKET, protocol %d)", self._socket_path, dip.PROTOCOL_VERSION)
         try:
             while not self._stopping.is_set():
                 try:
@@ -264,43 +249,23 @@ class SocketServer:
     def _serve_connection(self, connection: socket.socket) -> None:
         try:
             with connection:
-                while not self._stopping.is_set():
-                    try:
-                        control, payload = protocol.recv_message(
-                            connection, self._idle_timeout, self._message_timeout
-                        )
-                    except PeerGone:
-                        return
-                    except Timeout as exc:
-                        LOG.info("closing an idle or stalled connection: %s", exc)
-                        _try_send(connection, error("timeout", str(exc)))
-                        return
-                    except ProtocolError as exc:
-                        _try_send(connection, error("bad_request", str(exc)))
-                        return
-                    except OSError as exc:
-                        LOG.debug("connection dropped: %s", exc)
-                        return
-
-                    response = dispatch(self._manager, control, payload, self.health)
-                    if not _try_send(connection, response):
-                        return
+                dip.serve_connection(
+                    connection,
+                    lambda control, payload: dispatch(
+                        self._manager, control, payload, self.health
+                    ),
+                    self._idle_timeout,
+                    self._message_timeout,
+                    keep_going=lambda: not self._stopping.is_set(),
+                )
         finally:
             self._slots.release()
 
 
 def _refuse(connection: socket.socket) -> None:
-    """Answer `busy` and make sure the peer can actually read it before closing."""
+    """Answer `busy`; dip drains the socket so the peer can read it before the close."""
     LOG.warning("refusing a connection: %d already open", MAX_CONNECTIONS)
-    with connection:
-        _try_send(connection, error("busy", f"{MAX_CONNECTIONS} connections are already open"))
-        try:
-            connection.shutdown(socket.SHUT_WR)
-            connection.settimeout(REFUSAL_DRAIN_SECONDS)
-            while connection.recv(4096):
-                pass
-        except OSError:
-            pass
+    dip.refuse(connection, error(ErrorCode.busy, f"{MAX_CONNECTIONS} connections are already open"))
 
 
 def _unwritable(directory: Path, reason: object) -> str:
@@ -315,21 +280,3 @@ def _unwritable(directory: Path, reason: object) -> str:
         "first created by another container, remove the volume and let this service start "
         "first (deployment/docker-compose.yml orders it that way), or chown the volume."
     )
-
-
-def _try_send(connection: socket.socket, response: Dict[str, Any]) -> bool:
-    try:
-        protocol.send_message(connection, response)
-        return True
-    except (ProtocolError, Timeout) as exc:
-        # The response itself is unsendable (over a ceiling, or the peer stopped reading).
-        # Say so in a message that definitely fits rather than dropping the connection.
-        LOG.warning("could not send a response: %s", exc)
-        try:
-            protocol.send_message(connection, error("response_too_large", str(exc)))
-        except OSError:
-            pass
-        return False
-    except OSError as exc:
-        LOG.debug("could not answer peer: %s", exc)
-        return False

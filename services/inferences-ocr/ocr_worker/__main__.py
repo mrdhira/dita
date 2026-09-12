@@ -6,12 +6,13 @@ import argparse
 import logging
 import os
 import signal
-import socket
 import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from . import __version__, protocol
+import dip
+
+from . import __version__
 from .manager import ModelManager
 from .registry import DEFAULT_REGISTRY_PATH, RegistryError, load_registry
 from .server import SocketDirectoryError, SocketServer
@@ -76,12 +77,9 @@ def run_probe(socket_path: Path, probe: str) -> int:
     """
     op = PROBES[probe]
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as sock:
-            sock.settimeout(PROBE_TIMEOUT)
-            sock.connect(str(socket_path))
-            protocol.send_message(sock, {"op": op}, timeout=PROBE_TIMEOUT)
-            response, _payload = protocol.recv_message(sock, PROBE_TIMEOUT, PROBE_TIMEOUT)
-    except (OSError, protocol.ProtocolError, protocol.Timeout, protocol.PeerGone) as exc:
+        with dip.Requester.connect(socket_path, PROBE_TIMEOUT) as requester:
+            response = requester.probe(op)
+    except (OSError, dip.ProtocolError, dip.Timeout, dip.PeerGone) as exc:
         print(f"{op}: unreachable at {socket_path}: {exc}", file=sys.stderr)
         return 1
 

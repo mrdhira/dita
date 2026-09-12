@@ -2,8 +2,9 @@
 
 > Dials the worker's unix socket and runs the whole contract: handshake, list, load, infer, unload.
 
-Standard library only. No `go.mod` requires, no framing library, nothing to vendor — the
-protocol is small enough that a dependency would cost more than it saves. This is the shape
+Standard library only, transitively: the framing lives in
+[`packages/golibs/dip`](../../../../packages/golibs/dip), which is this repo's own module
+and has no requires of its own. Nothing to vendor. This is the shape
 `services/dita-orchestrator` will follow when it grows a worker client.
 
 ## Run it
@@ -43,6 +44,9 @@ unload     done
 
 ## The three things a client has to get right
 
+None of them are in this file any more — `dip` does them, and the conformance corpus proves
+it does them the same way the Python worker does.
+
 **`unixpacket`, not `unix`.** Go's `unixpacket` network is `SOCK_SEQPACKET`: message
 boundaries and ordering are preserved, so one `Write` is one datagram and one `Read` is one
 datagram. Never wrap the connection in a `bufio.Writer` — it would merge datagrams and
@@ -52,11 +56,13 @@ destroy the framing the protocol depends on.
 default; above that `Write` fails with `EMSGSIZE` rather than fragmenting. That applies to
 the control block just as much as to the image: a dense page's OCR result runs past it. So a
 message is a small prologue datagram carrying both lengths, then the control block and the
-payload each split at `max_chunk`. See `sendMessage` and `recvMessage` in `main.go`.
+payload each split at `max_chunk`, which `dip.Handshake` learns from the worker rather than
+assuming. See `packages/golibs/dip/framing.go`.
 
-**Check `ok` on every response.** A failure is `{"ok": false, "error": {"code", "message"}}`.
-`code` is the stable part; `message` is for humans. `checksum_mismatch` and `fetch_failed`
-mean retrying `infer` will not help — retry the `load` or pick another model.
+**Check `ok` on every response.** A failure is `{"ok": false, "error": {"code", "message"}}`,
+and `dip` returns it as an error carrying the code: branch with `dip.CodeOf(err)`. `code` is
+the stable part; `message` is for humans. `checksum_mismatch` and `fetch_failed` mean
+retrying `infer` will not help — retry the `load` or pick another model.
 
 The protocol table, the limits and the error codes are in
 [the service README](../../README.md).

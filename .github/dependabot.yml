@@ -7,8 +7,8 @@
 # updates packages *inside the lock*, transitive ones included -- antlr4-python3-runtime,
 # the example that motivated the old workflow, is in uv.lock and therefore in scope here.
 #
-# Directory is `/` because that is where the virtual workspace root and the single lock
-# live; one entry covers every member under services/inferences-*.
+# Three ecosystems, one tool. uv covers the Python workspace from the root, docker covers
+# the pinned base image, gomod covers the Go modules.
 
 version: 2
 
@@ -34,3 +34,39 @@ updates:
     labels:
       - dependencies
       - python
+
+  # The base image is pinned to an exact patch, so nothing bumps it but this.
+  - package-ecosystem: docker
+    directory: /services/inferences-ocr
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    labels:
+      - dependencies
+      - docker
+
+  # go.sum and go.work.sum are empty today; this is what notices the day they are not.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    labels:
+      - dependencies
+      - go

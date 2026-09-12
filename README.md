@@ -14,8 +14,29 @@ nothing else.
 | `services/inferences-stt` | Python | Speech to text. | placeholder |
 | `services/inferences-tts` | Python | Text to speech. | placeholder |
 
-Shared packages live under `packages/`. Deployment lives in
-[`deployment/docker-compose.yml`](deployment/docker-compose.yml).
+Deployment lives in [`deployment/docker-compose.yml`](deployment/docker-compose.yml).
+
+## Shared packages
+
+`packages/` is organised **language-first**, because the tooling is:
+
+```
+packages/
+  golibs/     Go modules, each its own go.mod, listed in go.work
+  pylibs/     Python packages, each a uv workspace member with a src/ layout
+```
+
+Each toolchain globs only its own subtree — `[tool.uv.workspace] members` covers
+`packages/pylibs/*`, `go.work` covers modules under `packages/golibs/` — so neither tool
+tries to own the other's tree, and `packages/` itself is not a service.
+
+`go.work` takes no glob, so a new Go module is added with `make go-work-sync`
+(`go work use -r`), which expands it into the explicit list.
+
+**The one exception to language-first is the protocol spec.** It is a single
+language-neutral document with two generated implementations, so it cannot live under
+either language's directory without one implementation looking authoritative. It lives in
+`docs/`, and both `golibs` and `pylibs` point at it.
 
 ## Getting set up
 
@@ -133,12 +154,36 @@ per-service lock would reintroduce exactly the per-service resolution the worksp
 and give two files the authority to disagree.
 
 Bounds live in each service's `pyproject.toml`; exact versions and hashes live in
-[`uv.lock`](uv.lock), which is committed. `.python-version` at the root pins the interpreter
-for the one workspace virtualenv, so uv never has to guess.
+[`uv.lock`](uv.lock), which is committed.
+
+**Python is pinned to an exact patch, 3.14.6**, in three places that must agree:
+[`.python-version`](.python-version) for the workspace virtualenv, `requires-python` in each
+service, and the base image tag `python:3.14.6-slim-trixie`. `make doctor` asserts the exact
+version rather than the minor, because a rolling tag changes what you shipped without
+changing anything you wrote.
 
 **Services are applications, not libraries.** Each sets `[tool.uv] package = false`, so uv
 installs its dependencies but never builds or publishes it — they appear in the lock as
 `virtual`. Shared code under `packages/` stays installable and appears as `editable`.
 
-**Dependabot is the only update mechanism.** Its `uv` ecosystem reads the root manifest plus
-the lock and can move transitive packages, which a flat requirements file never exposed.
+**Dependabot is the only update mechanism**, across three ecosystems: `uv` for the Python
+workspace, `docker` for the pinned base image, and `gomod` for the Go modules. The `uv`
+ecosystem reads the root manifest plus the lock and can move transitive packages, which a
+flat requirements file never exposed.
+
+## Go modules
+
+Every `go.mod` carries `go 1.27.1` and [`go.work`](go.work) carries both `go 1.27.1` and
+`toolchain go1.27.1`, matching [`.tool-versions`](.tool-versions). `make doctor` fails if any
+of them drift. The compiler on your `PATH` is not what builds this repo; these directives are.
+
+A `go` directive at the full patch **is** the pin, and a `toolchain` directive is only
+meaningful in a `go.mod` when it names a version *newer* than the `go` line. Setting both to
+1.27.1 makes the module untidy: `go build` refuses with "updates to go.mod needed" and
+`go mod tidy` deletes the line. `go.work` is the one file that accepts both.
+
+[`go.work.sum`](go.work.sum) and the `go.sum` of every stdlib-only module are committed
+while empty, so the layout is complete from day one. **An empty lockfile is not a lock** —
+they stay empty until that module takes a third-party dependency, and the `gomod` Dependabot
+entry is what notices the day one arrives. `services/dita-orchestrator` already has real
+dependencies, so its `go.sum` has real content.

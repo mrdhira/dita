@@ -3,7 +3,7 @@
 SERVICES := services/inferences-ocr
 COMPOSE  := docker compose -f deployment/docker-compose.yml
 
-.PHONY: help doctor test coverage build lock lock-check lock-upgrade
+.PHONY: help doctor test coverage build lock lock-check lock-upgrade go-work-sync
 
 help:
 	@echo "doctor        check this machine has the tools this repo needs"
@@ -13,6 +13,7 @@ help:
 	@echo "lock          re-resolve uv.lock after editing a pyproject.toml"
 	@echo "lock-check    fail if uv.lock is out of date (what the image build enforces)"
 	@echo "lock-upgrade  re-resolve, allowing newer versions within the declared bounds"
+	@echo "go-work-sync  add every module under packages/golibs to go.work"
 	@echo ""
 	@echo "services: $(SERVICES)"
 
@@ -44,3 +45,7 @@ lock-check:
 
 lock-upgrade:
 	uv lock --upgrade
+
+# go.work takes no glob, so new golibs modules are expanded into it explicitly.
+go-work-sync:
+	go work use -r ./packages/golibs

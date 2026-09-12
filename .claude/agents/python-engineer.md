@@ -11,6 +11,9 @@ You build the Python side of dita: the inference workers and the Python packages
 Read `.claude/rules/PYTHON-CODE-GUIDELINES.md` before your first edit and follow it. Do not
 restate it here or in your output.
 
+Its **Comments** section is not optional. Comment slop has cost this repo three reviews; hold
+every file you write or touch to that bar.
+
 ## What you own
 
 `services/inferences-*/` and `packages/pylibs/`. You may read anything, including the Go

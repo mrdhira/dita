@@ -1,64 +1,35 @@
 # Repo-level tasks. Each unit owns its own Makefile; this delegates and never blends.
-#
-# A unit is anything with its own tests and its own coverage number: a service, a shared
-# package, or an example. Examples are units too -- they are code someone will copy.
-#
-# The unit list is DISCOVERED, not written down. This file is cross-cutting: every branch
-# that adds a package would otherwise have to edit it, and a hand-edited copy per branch
-# is how three branches ended up aggregating only `services/` and silently skipping their
-# own packages. Discovery makes one identical file correct on every branch, and stops the
-# file being a merge conflict.
-#
-# The rule: a directory is a unit when it has its own Makefile. That Makefile IS the
-# delegation contract -- `test` and `coverage` are what this file calls. A go.mod beside
-# it decides which language it is. Keying on go.mod alone would be wrong: a vendored or
-# third-party Go service (services/dita-orchestrator) carries a go.mod, has no test
-# contract, and would both produce "no rule to make target" noise and fail the
-# zero-dependency gate it was never meant to be held to. Such modules are reported by
-# `make units` rather than silently dropped.
+# A unit is any directory carrying a Makefile, and the list is discovered rather than
+# written down, so one identical file is correct on every branch.
 
 UNIT_ROOTS := $(wildcard services packages)
 
-# maxdepth 4 reaches services/<svc>/examples/<lang>/Makefile, the deepest unit shape in
-# this repo, without descending into a unit's own build output. Hidden directories (.venv,
-# .git) are excluded so a vendored Makefile can never be mistaken for a unit.
+# maxdepth 4 reaches services/<svc>/examples/<lang>/, the deepest unit shape here.
 UNIT_DIRS := $(if $(UNIT_ROOTS),$(shell find $(UNIT_ROOTS) -mindepth 2 -maxdepth 4 \
              -name Makefile ! -path '*/.*' 2>/dev/null | sed 's|/Makefile$$||' | sort))
 
 GO_UNITS := $(strip $(foreach d,$(UNIT_DIRS),$(if $(wildcard $(d)/go.mod),$(d))))
 PY_UNITS := $(filter-out $(GO_UNITS),$(UNIT_DIRS))
-# strip matters: with both halves empty this is a single space, and $(if ) treats a
-# whitespace-only value as true, so the "nothing to test" guard would never fire.
+# strip matters: with both halves empty this is a single space, which $(if) reads as true.
 UNITS    := $(strip $(PY_UNITS) $(GO_UNITS))
 
-# Every Go module on the branch, so the ones without a test contract stay visible.
+# Every go.mod on the branch, so modules without a test contract stay visible.
 GO_MODULES   := $(if $(UNIT_ROOTS),$(shell find $(UNIT_ROOTS) -maxdepth 4 \
                 -name go.mod ! -path '*/.*' 2>/dev/null | sed 's|/go\.mod$$||' | sort))
 GO_UNTESTED  := $(filter-out $(GO_UNITS),$(GO_MODULES))
 
-# The zero-third-party bar applies to the shared packages, not to services that are
-# allowed their own dependencies.
 PY_PKGS := $(filter packages/pylibs/%,$(PY_UNITS))
 GO_PKGS := $(filter packages/golibs/%,$(GO_UNITS))
 
-# yaml is the worker's manifest reader dependency: declared in its package manifest and
-# named here so it stays a decision rather than a drift. Keyed by package directory name,
-# so a package needs an entry only when it claims an allowance.
+# yaml is the worker's manifest reader; named here so it stays a decision rather than drift.
 PY_ALLOW_worker := --allow yaml
 
-# Which halves of the dependency gate this branch can actually run. A branch with no
-# packages has neither, and `dip-verify` then has nothing to do instead of failing.
+# Which halves of the dependency gate this branch can actually run.
 VERIFY_HALVES := $(strip $(if $(GO_UNITS),go-verify) $(if $(PY_PKGS),py-verify))
-
-# `test` gates on the dependency check -- an acceptance criterion nothing invokes is one
-# nobody honours -- but the prerequisite itself is conditional: TEST_GATE expands to
-# `dip-verify` on a branch that has something to verify and to NOTHING on a branch that
-# does not, so `test` on a package-free tree simply has no gate rather than a failing one.
 TEST_GATE := $(if $(VERIFY_HALVES),dip-verify)
 
-# Same shape for codegen. Keyed on the discovered units rather than on $(wildcard dir):
-# ignored build output (.coverage, __pycache__) leaves a package directory on disk after a
-# checkout to a branch that does not carry it, so directory existence is not evidence.
+# Keyed on discovered units, not directory existence: build output (.coverage, __pycache__)
+# can leave a package directory on disk after checking out a branch that does not carry it.
 GENERATE_HALVES := $(strip $(if $(filter packages/pylibs/dip,$(PY_PKGS)),py-generate) \
                            $(if $(filter packages/golibs/dip,$(GO_PKGS)),go-generate))
 
@@ -111,8 +82,7 @@ test: $(TEST_GATE)
 		$(MAKE) --no-print-directory -C $$unit test || exit $$?; \
 	done
 
-# Each unit reports its own number against its own code. Never blended: a healthy unit
-# would otherwise mask an untested one.
+# Never blended: a healthy unit would otherwise mask an untested one.
 coverage:
 	@$(if $(UNITS),:,echo "no units on this branch -- nothing to measure")
 	@for unit in $(UNITS); do \
@@ -165,18 +135,14 @@ go-work-sync:
 	@test -d packages/golibs || { echo "go-work-sync: packages/golibs is not on this branch"; exit 1; }
 	go work use -r ./packages/golibs
 
-# The acceptance criterion for the generated code: a runtime library smuggled in by a
-# generator would be a dependency nobody chose. The Go and Python halves stay separately
-# named so a branch carrying one language never claims the other's target.
+# The generated code must not smuggle in a runtime library nobody chose.
 dip-verify: $(VERIFY_HALVES)
 	@$(if $(VERIFY_HALVES),:,echo "dip-verify: no packages on this branch -- nothing to verify")
 
 # `.Standard` is go's own verdict, so std's vendored packages (vendor/golang.org/x/net,
-# which arrives with `import "net"`) count as stdlib. Matching on a dotted path instead
-# would flag them, and flag the module's own packages, which `go list -deps` always lists.
-# `|| true` cannot be used on the go list line: grep -v exits 1 when it filters everything
-# out, but it would also swallow go list's own failure and report "stdlib only" for a
-# check that never ran. go list's status is captured on its own line, before grep sees it.
+# which arrives with `import "net"`) count as stdlib rather than third-party.
+# go list's status is captured on its own line: `|| true` here would also swallow its
+# failure and report "stdlib only" for a check that never ran.
 define go_third_party
 	deps=$$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./... 2>&1) || { \
 		echo "  CANNOT VERIFY: go list failed"; printf '%s\n' "$$deps" | sed 's/^/    /'; \
@@ -194,8 +160,7 @@ go-verify:
 		(cd $$unit && $(go_third_party)) || exit $$?; \
 	done
 
-# foreach rather than a shell loop: the allowance is per-package make data (PY_ALLOW_<pkg>)
-# and has to be looked up while make expands, not while the shell runs.
+# foreach, not a shell loop: the allowance is per-package make data.
 py-verify:
 	@$(if $(PY_PKGS),:,echo "no Python packages to verify on this branch")
 	@$(foreach unit,$(PY_PKGS), \

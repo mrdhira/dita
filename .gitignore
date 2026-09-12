@@ -14,6 +14,10 @@ services/inferences-*/models/*
 # Compiled Go example binaries (`go build` names them after the directory).
 services/inferences-ocr/examples/go/go
 
+# Go coverage profiles, written by each unit's `make coverage` so the floor can read a
+# total. The Python equivalent, .coverage, is ignored below.
+coverage.out
+
 # Python. uv.lock is deliberately NOT here -- it is committed.
 __pycache__/
 *.py[cod]

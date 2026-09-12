@@ -1,11 +1,12 @@
-# Context is the repo root; keep everything but the manifests, lock and worker source out.
+# Context is the repo root: exclude all but manifests, lock, worker source and pylibs.
 **/models/
 **/.venv/
 **/__pycache__/
 **/*.pyc
 run/
 docs/
-packages/
+packages/golibs/
+packages/pylibs/*/tests/
 deployment/
 services/dita-orchestrator/
 services/inferences-ocr/tests/

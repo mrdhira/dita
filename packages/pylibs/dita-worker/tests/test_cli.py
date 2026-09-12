@@ -12,6 +12,7 @@ import contextlib
 import io
 import os
 import signal
+import socket
 import tempfile
 import threading
 import unittest
@@ -20,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 from dita_worker import ModelManager, SocketServer, fetcher, load_registry
+from dita_worker import metrics as metrics_mod
 from dita_worker.cli import build_parser, main, probe_line, run_probe
 
 from .support import FakeEngine, build_fake_engine, fake_worker, wait_until_listening, write_registry
@@ -251,12 +253,51 @@ class MainTest(unittest.TestCase):
         configured = mock.patch("logging.basicConfig")
         configured.start()
         self.addCleanup(configured.stop)
+        # An ephemeral port, never the fixed default: a test that binds 9109 takes it from
+        # whatever else on this machine wants it, including a worker someone is running.
+        metrics_port = mock.patch.dict(os.environ, {"METRICS_ADDR": "127.0.0.1:0"})
+        metrics_port.start()
+        self.addCleanup(metrics_port.stop)
 
     def test_a_registry_that_will_not_parse_exits_two(self) -> None:
         with self.assertLogs("dita_worker.cli", level="ERROR") as logged:
             code = main(self.worker, ["--registry", str(self.root / "absent.yaml")])
         self.assertEqual(code, 2)
         self.assertIn("not found", logged.output[0])
+
+    def test_a_metrics_address_that_cannot_be_parsed_is_a_reason_not_a_traceback(self) -> None:
+        with mock.patch.dict(os.environ, {"METRICS_ADDR": "127.0.0.1"}):
+            with self.assertLogs("dita_worker.cli", level="ERROR") as logged:
+                code = main(self.worker, ["--models-dir", str(self.root / "models")])
+        self.assertEqual(code, 2)
+        self.assertIn("must be host:port", logged.output[0])
+
+    def test_the_metrics_port_does_not_outlive_main(self) -> None:
+        """`main` starts the metrics server before the socket server, so any exit after
+        that point used to leave the port bound for the life of the process."""
+        locked = self.root / "locked"
+        locked.mkdir()
+        locked.chmod(0o500)
+        self.addCleanup(locked.chmod, 0o700)
+
+        started = []
+        real_serve = metrics_mod.serve
+
+        def remember(*args, **kwargs):
+            server = real_serve(*args, **kwargs)
+            started.append(server)
+            return server
+
+        with mock.patch.object(metrics_mod, "serve", remember):
+            with self.assertLogs("dita_worker.cli", level="ERROR"):
+                code = main(self.worker, ["--socket", str(locked / "sub" / "w.sock"),
+                                          "--models-dir", str(self.root / "models")])
+
+        self.assertEqual(code, 3)
+        self.assertEqual(len(started), 1, "main did not start a metrics server")
+        # Bindable again, which is only true because main gave the port back.
+        with socket.create_server(started[0].server_address[:2]) as rebound:
+            self.assertEqual(rebound.getsockname()[1], started[0].server_address[1])
 
     def test_a_socket_directory_it_cannot_use_exits_three(self) -> None:
         """The docker-volume-owned-by-root failure: a reason, not a traceback."""

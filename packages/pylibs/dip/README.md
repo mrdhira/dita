@@ -33,7 +33,7 @@ and a receiver owns them. What is here is what both implementations must agree o
 import dip
 
 with dip.Requester.connect("/run/dita/inferences-ocr.sock") as worker:
-    print(worker.handshake()["limits"])        # never hard-code a size
+    print(worker.handshake()["limits"])        # adopted: `worker.limits` frames every call
     worker.load("rapidocr-ppocrv5")
     result = worker.infer(open("page.png", "rb").read())
     print(result["text"] if result["ok"] else result["error"]["code"])
@@ -51,6 +51,12 @@ dip.serve_connection(connection, handle, idle_timeout, message_timeout)
 A failure is a response, not an exception — branch on `error.code`, log `error.message`.
 Only a connection that breaks raises: `ProtocolError`, `Timeout`, `PeerGone`.
 
+**Nothing on the wire is hard-coded.** `handshake` checks the peer's `protocol` and adopts
+the `limits` it advertises; `Limits` is then passed to every framing call, so a receiver
+with a smaller `max_chunk` is chunked to, not sent 64 KiB and hoped at. `DEFAULT_LIMITS` is
+only what to frame with until the handshake has answered. A receiver advertises its own by
+passing them to `serve_connection`.
+
 ## Tests
 
 ```bash
@@ -64,4 +70,5 @@ The suite is the conformance corpus plus the sockets. `tests/test_framing.py` an
 by the case name, so adding a case there needs no edit here. Framing cases are run twice,
 once against a peer that closed and once against a peer that stalled, because the corpus
 calls both `incomplete`. `tests/test_roles.py` is scenarios over real socket pairs: the two
-roles talking to each other, a stalled peer, a response past the ceiling, a refusal.
+roles talking to each other, a stalled peer, a response past the ceiling, a refusal, and a
+receiver advertising a chunk limit smaller than this package's own.

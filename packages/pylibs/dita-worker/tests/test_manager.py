@@ -14,7 +14,16 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict
 
-from dita_worker import FetchError, ModelManager, NoModelLoaded, dispatch, fetcher, load_registry
+from dita_worker import (
+    FetchError,
+    Metrics,
+    ModelManager,
+    NoModelLoaded,
+    UnknownEngine,
+    dispatch,
+    fetcher,
+    load_registry,
+)
 
 from .support import FakeEngine, build_fake_engine, fake_worker, write_registry
 
@@ -112,6 +121,28 @@ class OneModelResidentTest(unittest.TestCase):
         self.assertEqual(self.manager.resident()["id"], "alpha")
         self.assertFalse(loaded.closed)
         self.assertEqual(self.manager.infer(b"image")["model"], "alpha")
+
+    def test_a_build_that_fails_after_the_release_still_counts_the_eviction(self) -> None:
+        """The most interesting eviction is the invisible one. `load` releases first and
+        builds second -- the invariant -- so a build that raises has already evicted, and
+        counting the eviction only on the success path loses exactly that case."""
+        metrics = Metrics()
+        manager = ModelManager(
+            self.registry, Path("/nonexistent"), build_fake_engine, metrics
+        )
+        manager.load("alpha")
+        self.assertEqual(metrics.evictions, 0)
+
+        def refuses_to_build(name: str, model_dir: Path, options: Dict[str, Any]) -> Any:
+            raise UnknownEngine(f"no adapter for {name}")
+
+        manager._build_engine = refuses_to_build  # noqa: SLF001 - the seam is the subject
+        with self.assertRaises(UnknownEngine):
+            manager.load("beta")
+
+        self.assertIsNone(manager.resident(), "alpha was released, so nothing is resident")
+        self.assertEqual(metrics.evictions, 1, "the eviction happened and was never counted")
+        self.assertEqual(metrics.loads, {"alpha": 1}, "a failed build is not a load")
 
     # Not a table row: two threads rendezvousing on events.
     def test_inference_is_not_blocked_while_a_model_downloads(self) -> None:

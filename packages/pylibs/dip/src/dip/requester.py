@@ -19,9 +19,13 @@ from types import TracebackType
 from typing import Any
 
 from .framing import (
+    DEFAULT_LIMITS,
     IDLE_TIMEOUT,
     MESSAGE_TIMEOUT,
+    PROTOCOL_VERSION,
     SEND_TIMEOUT,
+    Limits,
+    ProtocolError,
     recv_message,
     send_message,
 )
@@ -41,6 +45,13 @@ class Requester:
         self._idle_timeout = idle_timeout
         self._message_timeout = message_timeout
         self._send_timeout = send_timeout
+        # This package's defaults until `handshake` answers, then the peer's own.
+        self._limits = DEFAULT_LIMITS
+
+    @property
+    def limits(self) -> Limits:
+        """The sizes this connection frames with right now."""
+        return self._limits
 
     @classmethod
     def connect(cls, socket_path: Path | str, timeout: float | None = SEND_TIMEOUT) -> "Requester":
@@ -59,8 +70,8 @@ class Requester:
         self, control: dict[str, Any], payload: bytes = b""
     ) -> tuple[dict[str, Any], bytes]:
         """One message out, one message back. The primitive every op below is made of."""
-        send_message(self._sock, control, payload, self._send_timeout)
-        return recv_message(self._sock, self._idle_timeout, self._message_timeout)
+        send_message(self._sock, control, payload, self._send_timeout, self._limits)
+        return recv_message(self._sock, self._idle_timeout, self._message_timeout, self._limits)
 
     def call(self, op: str, payload: bytes = b"", **fields: Any) -> dict[str, Any]:
         """One op, answered with its control block. No op answers with a payload today."""
@@ -68,8 +79,25 @@ class Requester:
         return response
 
     def handshake(self) -> dict[str, Any]:
-        """Once per connection: read `protocol` and take the limits from `limits`."""
-        return self.call("handshake")
+        """Once per connection: check `protocol` and adopt the limits the peer advertises.
+
+        A peer speaking another wire version raises rather than answering, because every
+        op after this one would be framed against a guess. Everything else this returns is
+        the receiver's own description of itself, for the caller to read.
+        """
+        response = self.call("handshake")
+        if not response.get("ok"):
+            return response
+
+        version = response.get("protocol")
+        if version != PROTOCOL_VERSION:
+            raise ProtocolError(
+                f"peer speaks protocol {version!r}, this package speaks {PROTOCOL_VERSION}"
+            )
+        advertised = response.get("limits")
+        if isinstance(advertised, dict):
+            self._limits = self._limits.adopt(advertised)
+        return response
 
     def list_models(self) -> dict[str, Any]:
         return self.call("list")

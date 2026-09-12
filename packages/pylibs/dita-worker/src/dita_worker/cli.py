@@ -152,9 +152,12 @@ def main(worker: Worker, argv: list[str] | None = None) -> int:
 
     # Its own port, never the DIP socket: a scrape is not the workload. Loopback by
     # default, so it is only reachable elsewhere when something says so explicitly.
-    address = metrics_mod.address_from_env()
-    if address is not None:
-        metrics_mod.serve(collector, worker.name, manager, address)
+    try:
+        address = metrics_mod.address_from_env()
+    except ValueError as exc:
+        LOG.error("%s", exc)
+        return 2
+    metrics_server = metrics_mod.serve(collector, worker.name, manager, address) if address else None
 
     def shutdown(signum: int, _frame: object) -> None:
         LOG.info("signal %s, shutting down", signal.Signals(signum).name)
@@ -170,4 +173,9 @@ def main(worker: Worker, argv: list[str] | None = None) -> int:
         return 3
     finally:
         manager.unload()
+        if metrics_server is not None:
+            # Returning with the port still bound would leave the next start of this
+            # process -- or the next test -- unable to have it.
+            metrics_server.shutdown()
+            metrics_server.server_close()
     return 0

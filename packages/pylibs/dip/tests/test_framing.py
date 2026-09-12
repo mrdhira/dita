@@ -82,6 +82,20 @@ class FramingCorpusTest(unittest.TestCase):
             {"max_chunk": MAX_CHUNK, "max_control": MAX_CONTROL, "max_payload": MAX_PAYLOAD},
         )
 
+    def test_the_chunking_cases_really_exceed_one_chunk(self) -> None:
+        """Anti-vacuity. Two accepted cases exist only to force the decoder to reassemble
+        several datagrams, and the only statement of that requirement is a `why` string in
+        the corpus. Shrink either fixture and the chunking is tested by nothing at all."""
+        accepted = [case for case in CORPUS["cases"] if case["expect"]["outcome"] == "accept"]
+        payloads = [case["expect"]["payload_len"] for case in accepted]
+        controls = [
+            case["expect"].get("control_shape", {}).get("control_len", 0) for case in accepted
+        ]
+        self.assertGreater(max(payloads), MAX_CHUNK, "no accepted payload spans two datagrams")
+        self.assertGreater(max(controls), MAX_CHUNK, "no accepted control block spans two datagrams")
+        # A prologue plus at least two chunks: the corpus ships the split, not just the size.
+        self.assertGreater(max(len(case["datagrams"]) for case in accepted), 2)
+
     def test_every_case(self) -> None:
         for case in CORPUS["cases"]:
             with self.subTest(case["name"]):

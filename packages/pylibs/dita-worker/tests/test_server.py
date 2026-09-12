@@ -13,9 +13,20 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import dip
-from dita_worker import MAX_CONNECTIONS, ModelManager, SocketServer, dispatch, fetcher, load_registry
+from dita_worker import server as server_mod
+from dita_worker import (
+    MAX_CONNECTIONS,
+    Health,
+    Metrics,
+    ModelManager,
+    SocketServer,
+    dispatch,
+    fetcher,
+    load_registry,
+)
 
 from .support import FakeEngine, build_fake_engine, fake_worker, wait_until_listening, write_registry
 
@@ -102,6 +113,57 @@ class DispatchTest(unittest.TestCase):
                 self.assertFalse(response["ok"])
                 self.assertEqual(response["error"]["code"], code)
                 self.assertIn(fragment, response["error"]["message"])
+
+
+class DispatchMetricsTest(unittest.TestCase):
+    """What `dispatch` records, which is a different question from what it answers."""
+
+    def setUp(self) -> None:
+        FakeEngine.built.clear()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        registry_path = write_registry(Path(directory.name))
+        self.worker = fake_worker(registry_path)
+        self.manager = ModelManager(
+            load_registry(registry_path), Path("/nonexistent"), build_fake_engine
+        )
+        self.metrics = Metrics()
+
+    def test_an_op_off_the_wire_cannot_grow_the_label_set(self) -> None:
+        """The op is peer input. `dip.validate` refuses an unknown one, but the metric is
+        recorded either way, and a peer looping on random names would otherwise grow this
+        dict forever inside a hard memory limit."""
+        for index in range(200):
+            dispatch(self.worker, self.manager, {"op": f"op-{index}"}, b"", None, self.metrics)
+        dispatch(self.worker, self.manager, {"op": 7}, b"", None, self.metrics)
+        dispatch(self.worker, self.manager, {"op": "list"}, b"", None, self.metrics)
+
+        self.assertEqual(
+            sorted(self.metrics.ops),
+            [("list", "ok"), ("unknown", "error")],
+            "an op name off the wire reached the label set",
+        )
+        self.assertEqual(self.metrics.ops[("unknown", "error")], 201)
+
+    def test_a_failing_probe_is_a_verdict_not_an_internal_error(self) -> None:
+        """`ok` false with no error body is a health probe answering the question it was
+        asked. Counting it as errors_total{code="internal"} would turn a read-only models
+        directory into a stream of internal errors this worker never had."""
+        health = Health(self.manager)
+        response = dispatch(self.worker, self.manager, {"op": "readyz"}, b"", health, self.metrics)
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["status"], "fail")
+        self.assertNotIn("error", response)
+        self.assertEqual(self.metrics.ops, {("readyz", "fail"): 1})
+        self.assertEqual(self.metrics.errors, {}, "a verdict was counted as an error")
+
+    def test_a_real_failure_is_still_counted_by_its_code(self) -> None:
+        """The other direction, so the test above is not passing by counting nothing."""
+        dispatch(self.worker, self.manager, {"op": "infer"}, b"png", None, self.metrics)
+
+        self.assertEqual(self.metrics.ops, {("infer", "error"): 1})
+        self.assertEqual(self.metrics.errors, {"no_model_loaded": 1})
 
 
 class SocketServerTest(unittest.TestCase):
@@ -197,6 +259,29 @@ class SocketServerTest(unittest.TestCase):
             response, _payload = dip.recv_message(sock)
             self.assertTrue(response["ok"], f"{op}: {response.get('reasons')}")
             self.assertEqual(response["probe"], op)
+
+    def test_a_thread_that_will_not_start_gives_its_slot_back(self) -> None:
+        """The slot is taken before the thread and released in the thread's `finally`, so a
+        thread that never runs used to shrink the cap by one for the life of the process."""
+        real_thread = threading.Thread
+        failures = []
+
+        class ThreadThatWillNotStart(real_thread):
+            def start(self) -> None:
+                failures.append(True)
+                raise RuntimeError("can't start new thread")
+
+        with mock.patch.object(server_mod.threading, "Thread", ThreadThatWillNotStart):
+            with self.assertLogs("dita_worker.server", level="ERROR"):
+                doomed = self.connect()
+                # The server closed it without answering; the read proves it is gone.
+                self.assertEqual(doomed.recv(4096), b"")
+        self.assertGreaterEqual(len(failures), 1, "the thread was never made to fail")
+
+        # The cap is intact: every one of the slots is still there to be used.
+        for sock in [self.connect() for _ in range(MAX_CONNECTIONS)]:
+            dip.send_message(sock, {"op": "handshake"})
+            self.assertTrue(dip.recv_message(sock)[0]["ok"])
 
     # Not a table row: it holds 16 live sockets open at once.
     def test_connections_past_the_cap_are_told_they_are_refused(self) -> None:

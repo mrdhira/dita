@@ -235,7 +235,7 @@ pre/post asymmetry: same operation, different side of the library boundary.
 | Digest or size mismatch | `checksum_mismatch` | Unchanged; the bad file is deleted, never loaded. |
 | Engine construction fails after a good fetch | the underlying error as `internal` | **Nothing resident.** Deliberate: the old engine was already released, and keeping it alive would break the invariant. `readyz` goes false. |
 | `infer` with nothing resident | `no_model_loaded` | Unchanged. |
-| Response over `max_control` | `response_too_large` | The peer gets a code rather than an EOF, then the connection closes: a partial response has already gone out, so the stream cannot be trusted to resynchronise. |
+| Response over `max_control` | `response_too_large` | Nothing was sent: the encoder refuses before the first datagram, so the refusal is a whole message. The peer gets a code rather than an EOF, and the connection then closes by policy -- a response the receiver could not express means the request cannot be completed. |
 | Peer stalls mid-message | `timeout`, then the connection closes | The thread and its buffers are released. |
 | 17th concurrent connection | `busy`, then close after a drain window | Unchanged. |
 | Socket directory unwritable at boot | process exits 3 with a remediation message | Not serving. `startupz` would be false. |

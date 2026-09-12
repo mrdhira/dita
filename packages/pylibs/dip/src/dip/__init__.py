@@ -15,6 +15,7 @@ from __future__ import annotations
 from . import ops, types
 from .errors import ErrorCode, error, ok
 from .framing import (
+    DEFAULT_LIMITS,
     IDLE_TIMEOUT,
     MAX_CHUNK,
     MAX_CONTROL,
@@ -25,6 +26,7 @@ from .framing import (
     RECV_BUFFER,
     SEND_TIMEOUT,
     DatagramReader,
+    Limits,
     PeerGone,
     ProtocolError,
     Timeout,
@@ -42,11 +44,13 @@ from .requester import Requester
 __version__ = "0.1.0"
 
 __all__ = [
+    "DEFAULT_LIMITS",
     "DatagramReader",
     "ErrorCode",
     "Handler",
     "IDLE_TIMEOUT",
     "INFER_MODEL_HINT",
+    "Limits",
     "MAX_CHUNK",
     "MAX_CONTROL",
     "MAX_PAYLOAD",

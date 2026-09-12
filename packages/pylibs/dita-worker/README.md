@@ -179,7 +179,7 @@ the compose network instead, and publishes nothing.
 
 | metric | type | labels |
 | --- | --- | --- |
-| `dita_worker_ops_total` | counter | `op`, `outcome` |
+| `dita_worker_ops_total` | counter | `op`, `outcome` (`ok`, `error`, `fail`) |
 | `dita_worker_errors_total` | counter | `code` |
 | `dita_worker_model_loads_total` | counter | `model` |
 | `dita_worker_model_evictions_total` | counter | |
@@ -188,7 +188,17 @@ the compose network instead, and publishes nothing.
 | `dita_worker_load_duration_seconds` | histogram | `model` |
 | `dita_worker_infer_duration_seconds` | histogram | `model` |
 | `dita_worker_model_resident`, `..._resident_seconds`, `..._loading` | gauge | `model` |
-| `process_resident_memory_bytes`, `process_cpu_seconds_total`, `dita_worker_uptime_seconds` | | |
+| `process_resident_memory_bytes`, `..._peak_bytes`, `process_cpu_seconds_total`, `dita_worker_uptime_seconds` | | |
+
+`op` is peer input, so an op that is not one of the nine is counted as `unknown` rather
+than as itself: a label taken off the wire is a dict that grows until the container dies.
+`outcome` is `fail` for a health probe answering false, which is a verdict and not an
+error -- `errors_total` counts failures, and a `readyz` that says no is not one.
+
+The three gauges always carry `model`, naming the last model this worker had resident, so
+an unload takes the series to zero instead of deleting it. `process_resident_memory_bytes`
+is the current resident set read from `/proc/self/statm`; the high-water mark is next to it
+under a name that says peak, because only the first one can show that an eviction worked.
 
 Two properties the tests hold to, because both are easy to lose:
 

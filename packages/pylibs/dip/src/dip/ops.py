@@ -53,6 +53,22 @@ def validate(control: dict[str, Any]) -> dict[str, Any] | None:
 
     if declared is None:
         return error(ErrorCode.bad_request, f"unknown op {op!r}; expected one of {', '.join(OPS)}")
-    if op == "load" and not (control.get("id") or control.get("model")):
+    if op == "load":
+        return _load_target_refusal(control)
+    return None
+
+
+def _load_target_refusal(control: dict[str, Any]) -> dict[str, Any] | None:
+    """`load` needs one string. An id becomes a directory name and a registry key, so a
+    number stringified into one invents a model that was never asked for; naming the
+    caller's bug is the only useful answer."""
+    for field in ("id", "model"):
+        value = control.get(field)
+        if value is not None and not isinstance(value, str):
+            return error(
+                ErrorCode.bad_request,
+                f"load `{field}` must be a string, got {type(value).__name__}",
+            )
+    if not (control.get("id") or control.get("model")):
         return error(ErrorCode.bad_request, "load needs an `id`")
     return None

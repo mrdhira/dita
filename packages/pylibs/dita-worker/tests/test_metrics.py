@@ -7,16 +7,21 @@ around a real call rather than a check that a name appears in the output.
 from __future__ import annotations
 
 import http.client
+import os
 import shutil
+import socket
+import socketserver
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import dip
 
 from dita_worker import Metrics, ModelManager, Result, SocketServer, metrics as metrics_mod
+from dita_worker.metrics import INFER_BUCKETS
 
 from .support import (
     FakeEngine,
@@ -50,10 +55,75 @@ class MetricsRenderTest(unittest.TestCase):
 
     def test_an_untouched_collector_still_reports_the_gauges(self) -> None:
         body = self.render()
-        self.assertEqual(body['dita_worker_model_resident{worker="inferences-test"}'], 0)
-        self.assertEqual(body['dita_worker_model_loading{worker="inferences-test"}'], 0)
+        # No model has ever been resident, so the label is empty -- which is how the text
+        # format spells a label that is not there.
+        self.assertEqual(body['dita_worker_model_resident{worker="inferences-test",model=""}'], 0)
+        self.assertEqual(body['dita_worker_model_loading{worker="inferences-test",model=""}'], 0)
         self.assertIn('process_resident_memory_bytes{worker="inferences-test"}', body)
         self.assertGreater(body['process_resident_memory_bytes{worker="inferences-test"}'], 0)
+
+    def test_a_counter_family_is_declared_before_its_first_event(self) -> None:
+        """A family that only appears once something has happened reads as a metric nobody
+        exports, and both rate() and absent() misbehave against a worker that just started."""
+        text = self.metrics.render("inferences-test", None)
+        for name in ("dita_worker_ops_total", "dita_worker_errors_total",
+                     "dita_worker_model_loads_total", "dita_worker_infer_duration_seconds"):
+            self.assertIn(f"# TYPE {name} ", text)
+
+    def test_a_gauge_keeps_naming_the_model_after_it_is_gone(self) -> None:
+        """An unload must take the series to zero, not delete it: a label that comes and
+        goes with the value is a series nothing can alert on."""
+        self.metrics.loaded("alpha", 1.0)
+        resident = f'dita_worker_model_resident{{worker="inferences-test",model="alpha"}}'
+        seconds = f'dita_worker_model_resident_seconds{{worker="inferences-test",model="alpha"}}'
+
+        class Resident:
+            loading = None
+
+            def resident(self):
+                return {"id": "alpha", "resident_seconds": 12.5}
+
+        body = parse(self.metrics.render("inferences-test", Resident()))
+        self.assertEqual(body[resident], 1)
+        self.assertEqual(body[seconds], 12.5)
+
+        body = self.render()  # nothing resident any more
+        self.assertEqual(body[resident], 0)
+        self.assertEqual(body[seconds], 0)
+
+    def test_a_scrape_cannot_catch_a_histogram_half_observed(self) -> None:
+        """The buckets are mutated in place, so a shallow snapshot lets a scrape emit a
+        bucket above +Inf and above _count -- nonsense that histogram_quantile believes.
+
+        The observation lands in another thread, between the snapshot and the rendering of
+        it: `render` reads the manager after releasing its own lock, so a manager is the
+        one seam that is guaranteed to be that moment.
+        """
+        metrics = self.metrics
+
+        class ObservingManager:
+            loading = None
+
+            def resident(self):
+                observer = threading.Thread(
+                    target=lambda: [metrics.inferred("alpha", 0.01) for _ in range(50)]
+                )
+                observer.start()
+                observer.join(timeout=10)
+                return None
+
+        metrics.inferred("alpha", 0.01)
+        body = parse(metrics.render("inferences-test", ObservingManager()))
+
+        label = 'worker="inferences-test",model="alpha"'
+        count = body[f'dita_worker_infer_duration_seconds_count{{{label}}}']
+        self.assertEqual(count, 1, "the snapshot should predate the 50 concurrent observations")
+        for edge in INFER_BUCKETS:
+            bucket = body[f'dita_worker_infer_duration_seconds_bucket{{{label},le="{edge}"}}']
+            self.assertLessEqual(bucket, count, f"le={edge} is above the count")
+        self.assertEqual(
+            body[f'dita_worker_infer_duration_seconds_bucket{{{label},le="+Inf"}}'], count
+        )
 
     def test_every_counter_moves_on_the_path_it_names(self) -> None:
         cases = [
@@ -61,9 +131,9 @@ class MetricsRenderTest(unittest.TestCase):
              'dita_worker_ops_total{worker="inferences-test",op="infer",outcome="ok"}'),
             ("errors", lambda: self.metrics.error("no_model_loaded"),
              'dita_worker_errors_total{worker="inferences-test",code="no_model_loaded"}'),
-            ("loads", lambda: self.metrics.loaded("alpha", 1.0, None),
+            ("loads", lambda: self.metrics.loaded("alpha", 1.0),
              'dita_worker_model_loads_total{worker="inferences-test",model="alpha"}'),
-            ("evictions", lambda: self.metrics.loaded("beta", 1.0, "alpha"),
+            ("evictions", lambda: self.metrics.evicted("alpha"),
              'dita_worker_model_evictions_total{worker="inferences-test"}'),
             ("fetched bytes", lambda: self.metrics.fetched(4096),
              'dita_worker_fetched_bytes_total{worker="inferences-test"}'),
@@ -181,6 +251,153 @@ class MetricsEndpointTest(unittest.TestCase):
         self.assertIn("dita_worker_model_resident", body)
 
 
+class ProcessMemoryTest(unittest.TestCase):
+    """`process_resident_memory_bytes` is the gauge an eviction is supposed to move."""
+
+    def test_it_reads_the_resident_field_not_the_first_one(self) -> None:
+        """statm is `size resident shared ...`: the first field is the address space,
+        which is several times the truth and never falls either."""
+        with tempfile.NamedTemporaryFile("w", suffix=".statm", delete=False) as handle:
+            handle.write("999999 1234 500 10 0 2000 0\n")
+        self.addCleanup(Path(handle.name).unlink)
+
+        self.assertEqual(
+            metrics_mod.resident_memory_bytes(handle.name), 1234 * metrics_mod.PAGE_SIZE
+        )
+
+    REAL = 'process_resident_memory_bytes{worker="inferences-test"}'
+    PEAK = 'process_resident_memory_peak_bytes{worker="inferences-test"}'
+
+    def test_both_the_current_size_and_the_peak_are_reported(self) -> None:
+        """The peak is worth having; it is not worth having under the name every dashboard
+        reads as current memory."""
+        body = parse(Metrics().render("inferences-test", None))
+        self.assertGreater(body[self.REAL], 0)
+        self.assertGreater(body[self.PEAK], 0)
+
+    def test_no_proc_to_read_means_no_gauge_rather_than_a_wrong_one(self) -> None:
+        self.assertIsNone(metrics_mod.resident_memory_bytes("/nonexistent/statm"))
+
+        with mock.patch.object(metrics_mod, "resident_memory_bytes", lambda: None):
+            body = parse(Metrics().render("inferences-test", None))
+        self.assertNotIn(self.REAL, body)
+        self.assertGreater(body[self.PEAK], 0, "the peak is still reported")
+
+
+class AddressTest(unittest.TestCase):
+    ADDRESSES = [
+        ("ipv4", "127.0.0.1:9109", ("127.0.0.1", 9109), socket.AF_INET),
+        ("a hostname", "metrics.internal:80", ("metrics.internal", 80), socket.AF_INET),
+        ("bracketed ipv6", "[::1]:9109", ("::1", 9109), socket.AF_INET6),
+        ("bracketed ipv6, any", "[::]:9109", ("::", 9109), socket.AF_INET6),
+    ]
+
+    def test_an_address_parses_into_a_host_a_port_and_a_family(self) -> None:
+        for name, value, expected, family in self.ADDRESSES:
+            with self.subTest(name):
+                self.assertEqual(metrics_mod.parse_addr(value), expected)
+                self.assertEqual(metrics_mod.address_family(expected[0]), family)
+
+    REFUSED = [("no port", "127.0.0.1"), ("no host", ":9109"), ("a named port", "localhost:http"),
+               ("empty", "")]
+
+    def test_an_address_that_cannot_be_bound_is_refused_not_guessed(self) -> None:
+        for name, value in self.REFUSED:
+            with self.subTest(name):
+                with self.assertRaises(ValueError):
+                    metrics_mod.parse_addr(value)
+
+    def test_the_env_var_decides_whether_there_is_a_port_at_all(self) -> None:
+        cases = [("unset", {}, metrics_mod.parse_addr(metrics_mod.DEFAULT_ADDR)),
+                 ("off", {"METRICS_ADDR": "off"}, None),
+                 ("empty", {"METRICS_ADDR": "  "}, None),
+                 ("set", {"METRICS_ADDR": "0.0.0.0:1234"}, ("0.0.0.0", 1234))]
+        for name, environment, expected in cases:
+            with self.subTest(name):
+                with mock.patch.dict(os.environ, environment, clear=True):
+                    self.assertEqual(metrics_mod.address_from_env(), expected)
+
+
+class MetricsHardeningTest(unittest.TestCase):
+    """The scrape port is reachable by anything that can reach the pod, and it is HTTP/1.1,
+    so a connection outlives its request. Both are bounded on purpose."""
+
+    def start(self, **kwargs):
+        self.server = metrics_mod.serve(
+            Metrics(), "inferences-test", None, ("127.0.0.1", 0), **kwargs
+        )
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        return self.server.server_address
+
+    def connect(self, address) -> socket.socket:
+        client = socket.create_connection(address, timeout=5)
+        self.addCleanup(client.close)
+        return client
+
+    def test_a_client_that_says_nothing_is_hung_up_on(self) -> None:
+        client = self.connect(self.start(request_timeout=0.25))
+        # Not one byte of a request. Without a handler timeout this read never returns and
+        # the thread behind it is pinned for good.
+        self.assertEqual(client.recv(1), b"", "the server kept an idle connection open")
+
+    def test_a_scrape_past_the_cap_is_refused_rather_than_queued(self) -> None:
+        address = self.start(request_timeout=5.0, max_scrapes=1)
+
+        held = http.client.HTTPConnection(*address, timeout=5)
+        self.addCleanup(held.close)
+        held.request("GET", "/metrics")
+        self.assertEqual(held.getresponse().status, 200)
+        # Keep-alive: that connection still holds the one slot there is.
+
+        refused = http.client.HTTPConnection(*address, timeout=5)
+        self.addCleanup(refused.close)
+        with self.assertLogs("dita_worker.metrics", level="WARNING"):
+            refused.request("GET", "/metrics")
+            with self.assertRaises((http.client.HTTPException, OSError)):
+                refused.getresponse()
+
+        # The cap is a cap, not a leak: closing the held connection frees the slot again.
+        held.close()
+        for _ in range(200):
+            try:
+                after = http.client.HTTPConnection(*address, timeout=5)
+                after.request("GET", "/metrics")
+                status = after.getresponse().status
+                after.close()
+                break
+            except (http.client.HTTPException, OSError):
+                time.sleep(0.01)
+        else:
+            self.fail("the slot was never released")
+        self.assertEqual(status, 200)
+
+    def test_a_handler_thread_that_will_not_start_gives_its_slot_back(self) -> None:
+        """The slot is taken before the thread and released by the thread, so a thread that
+        never runs would shrink the cap permanently -- to nothing, at a cap of one."""
+        address = self.start(max_scrapes=1)
+
+        with mock.patch.object(
+            socketserver.ThreadingMixIn, "process_request", side_effect=RuntimeError("no thread")
+        ):
+            with self.assertRaises(RuntimeError):
+                self.server.process_request(object(), ("127.0.0.1", 1))
+
+        connection = http.client.HTTPConnection(*address, timeout=5)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/metrics")
+        self.assertEqual(connection.getresponse().status, 200)
+
+    def test_the_server_header_does_not_name_the_interpreter(self) -> None:
+        address = self.start()
+        connection = http.client.HTTPConnection(*address, timeout=5)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/metrics")
+        header = connection.getresponse().getheader("Server")
+        self.assertEqual(header, "dita-worker-metrics")
+        self.assertNotIn("Python", header)
+
+
 class MetricsUnderLoadTest(unittest.TestCase):
     """End to end over a real socket: the numbers move because work happened."""
 
@@ -218,8 +435,9 @@ class MetricsUnderLoadTest(unittest.TestCase):
             self.assertEqual(body[f'dita_worker_model_evictions_total{{{w}}}'], 1)
             self.assertEqual(body[f'dita_worker_infer_duration_seconds_count{{{w},model="alpha"}}'], 3)
             self.assertGreaterEqual(body[f'dita_worker_connections_total{{{w},outcome="accepted"}}'], 1)
-            # unload happened, so nothing is resident at the end.
-            self.assertEqual(body[f'dita_worker_model_resident{{{w}}}'], 0)
+            # unload happened, so nothing is resident at the end -- and the gauge still
+            # names the model it last had, at zero, rather than dropping the series.
+            self.assertEqual(body[f'dita_worker_model_resident{{{w},model="beta"}}'], 0)
 
 
 if __name__ == "__main__":

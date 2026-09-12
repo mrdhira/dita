@@ -3,8 +3,9 @@
 Binding, the accept loop and any connection cap stay with the service. Those are policy --
 how many peers to hold, what to log, when to stop -- and a receiver owns them. What is
 protocol, and therefore here, is the exchange on one connection: which framing failure
-gets which error code, and the rule that a response we cannot send is still answered
-rather than dropped.
+gets which error code, and the rule that a response we cannot send is still answered --
+unless the peer stopped reading part-way through it, when a second message would be read
+as the rest of the first one.
 """
 
 from __future__ import annotations
@@ -16,8 +17,11 @@ from typing import Any
 
 from .errors import ErrorCode, error
 from .framing import (
+    DEFAULT_LIMITS,
     IDLE_TIMEOUT,
     MESSAGE_TIMEOUT,
+    SEND_TIMEOUT,
+    Limits,
     PeerGone,
     ProtocolError,
     Timeout,
@@ -41,41 +45,58 @@ def serve_connection(
     idle_timeout: float | None = IDLE_TIMEOUT,
     message_timeout: float | None = MESSAGE_TIMEOUT,
     keep_going: Callable[[], bool] | None = None,
+    limits: Limits = DEFAULT_LIMITS,
 ) -> None:
     """Answer messages on one connection until the peer goes away or `keep_going` says stop."""
     while keep_going is None or keep_going():
         try:
-            control, payload = recv_message(connection, idle_timeout, message_timeout)
+            control, payload = recv_message(connection, idle_timeout, message_timeout, limits)
         except PeerGone:
             return
         except Timeout as exc:
             LOG.info("closing an idle or stalled connection: %s", exc)
-            send_response(connection, error(ErrorCode.timeout, str(exc)))
+            send_response(connection, error(ErrorCode.timeout, str(exc)), limits=limits)
             return
         except ProtocolError as exc:
-            send_response(connection, error(ErrorCode.bad_request, str(exc)))
+            send_response(connection, error(ErrorCode.bad_request, str(exc)), limits=limits)
             return
         except OSError as exc:
             LOG.debug("connection dropped: %s", exc)
             return
 
-        if not send_response(connection, handle(control, payload)):
+        if not send_response(connection, handle(control, payload), limits=limits):
             return
 
 
-def send_response(connection: socket.socket, response: dict[str, Any]) -> bool:
+def send_response(
+    connection: socket.socket,
+    response: dict[str, Any],
+    send_timeout: float | None = SEND_TIMEOUT,
+    limits: Limits = DEFAULT_LIMITS,
+) -> bool:
     """Send one response. False means the connection is finished with."""
     try:
-        send_message(connection, response)
+        send_message(connection, response, b"", send_timeout, limits)
         return True
-    except (ProtocolError, Timeout) as exc:
-        # The response itself is unsendable (over a ceiling, or the peer stopped reading).
-        # Say so in a message that definitely fits rather than dropping the connection.
+    except ProtocolError as exc:
+        # Over a ceiling, and `encode_message` refuses before the first datagram, so
+        # nothing of this response is on the wire: a refusal now is a whole message and
+        # the peer is owed it rather than a dropped connection.
         LOG.warning("could not send a response: %s", exc)
         try:
-            send_message(connection, error(ErrorCode.response_too_large, str(exc)))
-        except OSError:
-            pass
+            send_message(
+                connection, error(ErrorCode.response_too_large, str(exc)), b"", send_timeout, limits
+            )
+        except (OSError, ProtocolError, Timeout) as also:
+            # Including Timeout, which is not an OSError: letting it out of here would
+            # kill the connection thread with a traceback instead of closing a socket.
+            LOG.debug("the refusal could not be sent either: %s", also)
+        return False
+    except Timeout as exc:
+        # The peer stopped reading part-way through this response. Anything sent now would
+        # be read as the rest of it, so the only honest move is to stop talking. It is not
+        # `response_too_large` either: the response was fine, the peer is not.
+        LOG.warning("peer stopped reading a response: %s", exc)
         return False
     except OSError as exc:
         LOG.debug("could not answer peer: %s", exc)

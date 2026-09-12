@@ -56,13 +56,22 @@ def dispatch(
     op = control.get("op")
     response = _dispatch(worker, manager, control, payload, health)
     if metrics is not None:
-        name = op if isinstance(op, str) else "unknown"
+        # The op comes off the wire, so it is peer input: an unknown one is counted under
+        # a fixed label. `dip.validate` refuses it, but the metric is recorded afterwards,
+        # and a peer looping on random names would otherwise grow this dict without bound
+        # inside a hard memory limit.
+        name = op if isinstance(op, str) and op in KNOWN_OPS else "unknown"
+        body = response.get("error")
         if response.get("ok"):
             metrics.op(name, "ok")
-        else:
-            code = (response.get("error") or {}).get("code", "internal")
+        elif isinstance(body, dict):
             metrics.op(name, "error")
-            metrics.error(code)
+            metrics.error(str(body.get("code", ErrorCode.internal)))
+        else:
+            # `ok` false with no error body is a health probe reporting a verdict, not a
+            # failure: a worker whose models directory goes read-only answers `readyz`
+            # honestly, and that is not an internal error.
+            metrics.op(name, "fail")
     return response
 
 
@@ -98,7 +107,8 @@ def _dispatch(
         if op == "list":
             return ok(**manager.list())
         if op == "load":
-            return ok(**manager.load(str(control.get("id") or control.get("model"))))
+            # A string by now, and non-empty: `dip.validate` refuses anything else.
+            return ok(**manager.load(control.get("id") or control.get("model")))
         if op == "unload":
             return ok(**manager.unload())
         if op == "infer":
@@ -172,7 +182,14 @@ class SocketServer:
                     daemon=True,
                     name=f"{self._worker.name}-conn",
                 )
-                thread.start()
+                try:
+                    thread.start()
+                except RuntimeError:
+                    # The slot is released by the thread that never ran, so it has to be
+                    # released here instead; otherwise the cap shrinks by one for good.
+                    LOG.exception("could not start a connection thread")
+                    self._slots.release()
+                    connection.close()
         finally:
             self.close()
 

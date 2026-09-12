@@ -13,8 +13,8 @@ class Health:
     """What each probe is allowed to be false for.
 
     Kubernetes names, because the semantics are the familiar ones (`healthz` is deprecated
-    and not offered). No HTTP surface here, so a container healthcheck is an exec probe:
-    `python -m <worker> --probe ready`.
+    and not offered). Health lives on the DIP socket, not on the metrics port, so a
+    container healthcheck is an exec probe: `python -m <worker> --probe ready`.
 
       livez    process and accept loop are up; no dependency checks. False: restart me.
       readyz   can be given work. A load in flight is progress, not a wedge, so a cold

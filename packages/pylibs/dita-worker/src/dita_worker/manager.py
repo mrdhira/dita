@@ -130,6 +130,11 @@ class ModelManager:
 
             previous = self._resident[0].id if self._resident else None
             self._release()
+            if previous is not None and self._metrics is not None:
+                # Here rather than after a successful build: the eviction is real the
+                # moment the engine is released, and the most interesting eviction is the
+                # one whose build then fails and is never seen at all.
+                self._metrics.evicted(previous)
             engine = self._build_engine(
                 spec.engine, fetcher.model_dir(self._models_dir, spec), spec.options
             )
@@ -139,7 +144,7 @@ class ModelManager:
         self._last_error = None
         load_ms = round((time.monotonic() - started) * 1000, 1)
         if self._metrics is not None:
-            self._metrics.loaded(spec.id, load_ms / 1000, previous)
+            self._metrics.loaded(spec.id, load_ms / 1000)
         LOG.info("loaded %s in %sms (unloaded %s)", spec.id, load_ms, previous or "nothing")
         return {
             "id": spec.id,

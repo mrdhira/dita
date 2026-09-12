@@ -1,0 +1,16 @@
+# Context is the repo root; keep everything but the manifests, lock and worker source out.
+**/models/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+run/
+docs/
+packages/
+deployment/
+services/dita-orchestrator/
+services/inferences-ocr/tests/
+services/inferences-ocr/examples/
+services/inferences-ocr/README.md
+.claude/
+.github/
+.git/

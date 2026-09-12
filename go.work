@@ -2,4 +2,5 @@ go 1.27.1
 
 use (
     ./services/dita-orchestrator
+    ./services/inferences-ocr/examples/go
 )

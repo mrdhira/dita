@@ -1,0 +1,10 @@
+# Virtual workspace root, not a package. Why two levels of pyproject: see README.md.
+
+[tool.uv.workspace]
+members = ["services/inferences-*"]
+# uv errors on a matched directory with no pyproject.toml. Delete an entry here when that
+# placeholder becomes a real service, or it stays out of the lock silently.
+exclude = ["services/inferences-stt", "services/inferences-tts"]
+
+[tool.uv]
+required-version = ">=0.12"

@@ -1,2 +1,23 @@
 # Secret / Credentials
 *.env
+
+# Runtime directories are bind-mounted into the containers. The directories themselves
+# are kept in git via .gitkeep; everything that lands inside them at runtime is not.
+run/*
+!run/.gitkeep
+
+# Model weights are never committed. They are fetched into the mounted models directory
+# and pinned by each service's models.yaml.
+services/inferences-*/models/*
+!services/inferences-*/models/.gitkeep
+
+# Compiled Go example binaries (`go build` names them after the directory).
+services/inferences-ocr/examples/go/go
+
+# Python. uv.lock is deliberately NOT here -- it is committed.
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.coverage
+htmlcov/

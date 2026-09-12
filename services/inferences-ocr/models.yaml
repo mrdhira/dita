@@ -1,0 +1,134 @@
+# Model registry for services/inferences-ocr.
+#
+# Weights are NEVER committed. This file only pins *where* each model comes from and
+# *exactly which bytes* are expected; the fetcher downloads into $MODELS_DIR and refuses
+# anything whose sha256 does not match.
+#
+# Provenance of the checksums below
+# --------------------------------
+# Every `sha256` and `bytes` value in this file was computed from a real download on
+# 2026-09-11 (sha256sum of the fetched file) and cross-checked against the Hugging Face
+# LFS object id where the file is LFS-tracked. None of them are guesses.
+# If a future entry cannot be verified, write `sha256: null` and leave a `# TODO: verify`
+# comment -- the fetcher treats null as "unverifiable" and refuses to load the model.
+#
+# Schema
+# ------
+# version        : registry schema version.
+# default_model  : the id the orchestrator should pick when it has no preference.
+# models[]       :
+#   id           : stable identifier used on the wire (`load`, `infer`).
+#   description  : one line, human facing.
+#   engine       : which engine adapter runs it (rapidocr | tesseract | manga_ocr).
+#   langs        : ISO 639-1 codes the model is trained for.
+#   source       : where the files come from.
+#                  type: huggingface -> `repo` + `revision` (an immutable commit sha).
+#                  type: system      -> nothing is downloaded; the model is a binary the
+#                                       image installs (see `apt_packages`).
+#   files[]      : files to materialise under $MODELS_DIR/<id>/.
+#                  path     : path inside the source repo.
+#                  dest     : path under $MODELS_DIR/<id>/ (defaults to `path`).
+#                  sha256   : expected digest, or null if unverified.
+#                  bytes    : expected size.
+#                  repo/revision may be overridden per file when one logical model is
+#                  assembled from more than one upstream repo (PP-OCRv5 splits detection
+#                  and recognition into two repos).
+# options      : engine specific knobs, passed through to the engine adapter.
+
+version: 1
+default_model: rapidocr-ppocrv5
+
+models:
+  - id: rapidocr-ppocrv5
+    description: >-
+      RapidOCR running PaddleOCR PP-OCRv5 mobile detection + recognition as ONNX.
+      ONNXRuntime only, no torch, no Paddle. Recognises Japanese, English and Chinese
+      in one pass. This is the default model.
+    engine: rapidocr
+    langs: [ja, en, zh]
+    source:
+      type: huggingface
+      repo: PaddlePaddle/PP-OCRv5_mobile_det_onnx
+      revision: e6f4fa85f00e168c862bc462aebca69eef9b3d3d
+    files:
+      - path: inference.onnx
+        dest: det/inference.onnx
+        sha256: a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d
+        bytes: 4826518
+      - path: inference.yml
+        dest: det/inference.yml
+        sha256: 98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699
+        bytes: 903
+      - repo: PaddlePaddle/PP-OCRv5_mobile_rec_onnx
+        revision: ed152b8b495f84de93cda5709d768548a9127622
+        path: inference.onnx
+        dest: rec/inference.onnx
+        sha256: da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092
+        bytes: 16534782
+      - repo: PaddlePaddle/PP-OCRv5_mobile_rec_onnx
+        revision: ed152b8b495f84de93cda5709d768548a9127622
+        path: inference.yml
+        dest: rec/inference.yml
+        sha256: 5dfeb2777f6d0db8177d8128a8acfcf6e6276dc4ac73ea3bf0dc06d6a5e85d8e
+        bytes: 148345
+    options:
+      det_model: det/inference.onnx
+      rec_model: rec/inference.onnx
+      # The PaddlePaddle ONNX export carries no `character` metadata, so the CTC label
+      # set is read out of PostProcess.character_dict in this (checksummed) yml and
+      # written next to the model as rec_keys.txt on first load.
+      rec_keys_from: rec/inference.yml
+      use_cls: false
+      text_score: 0.5
+
+  - id: tesseract
+    description: >-
+      The system tesseract binary. No download: the image installs it. Weakest of the
+      three on Japanese, but it is cheap, deterministic and useful as a fallback.
+    engine: tesseract
+    langs: [ja, en]
+    source:
+      type: system
+      # Required Debian packages -- already installed by services/inferences-ocr/Dockerfile.
+      apt_packages:
+        - tesseract-ocr
+        - tesseract-ocr-eng
+        - tesseract-ocr-jpn
+        - tesseract-ocr-jpn-vert
+    files: []
+    options:
+      binary: tesseract
+      lang: jpn+eng
+      psm: 3
+
+  - id: manga-ocr
+    description: >-
+      manga-ocr (kha-white) as ONNX: a Japanese vertical/manga text specialist. It reads
+      one text block per call and returns a single line, so feed it a crop, not a page.
+    engine: manga_ocr
+    langs: [ja]
+    source:
+      type: huggingface
+      repo: mayocream/manga-ocr-onnx
+      revision: 24b12778d85800835e2ca409236de281b8ab7b9f
+    files:
+      - path: encoder_model.onnx
+        sha256: 15fa8155fe9bc1a7d25d9bb353debaa4def033d0174e907dbd2dd6d995def85f
+        bytes: 343454249
+      - path: decoder_model.onnx
+        sha256: ef7765261e9d1cdc34d89356986c2bbc2a082897f753a89605ae80fdfa61f5e8
+        bytes: 117480262
+      - path: vocab.txt
+        sha256: 5cb5c5586d98a2f331d9f8828e4586479b0611bfba5d8c3b6dadffc84d6a36a3
+        bytes: 30216
+      - path: preprocessor_config.json
+        sha256: ee6588147df4bcd5ca13110900697f7b43b64f07da18a4427fa0d88eae857326
+        bytes: 376
+      - path: generation_config.json
+        sha256: 012bcb0da9625702d55556b6ed20b1da39de5eba707c5c9ee1575336cfc2a804
+        bytes: 273
+    options:
+      encoder: encoder_model.onnx
+      decoder: decoder_model.onnx
+      vocab: vocab.txt
+      max_tokens: 300

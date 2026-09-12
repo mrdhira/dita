@@ -1,0 +1,36 @@
+# The only dependency-update mechanism in this repo.
+#
+# It used to be two: Dependabot read a requirements.txt of direct dependencies, and a
+# weekly workflow ran `uv pip list --outdated` over the resolved environment to catch the
+# transitive packages Dependabot could not see. The workspace lockfile removed the need for
+# the second one. Dependabot's `uv` ecosystem reads the root pyproject.toml plus uv.lock and
+# updates packages *inside the lock*, transitive ones included -- antlr4-python3-runtime,
+# the example that motivated the old workflow, is in uv.lock and therefore in scope here.
+#
+# Directory is `/` because that is where the virtual workspace root and the single lock
+# live; one entry covers every member under services/inferences-*.
+
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    # One PR for the set, not one per package: rapidocr, onnxruntime, numpy and opencv are
+    # a coupled stack, and bumping them separately means testing combinations that will
+    # never ship together.
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    labels:
+      - dependencies
+      - python

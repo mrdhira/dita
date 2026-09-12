@@ -28,6 +28,10 @@ PY_ALLOW_worker := --allow yaml
 VERIFY_HALVES := $(strip $(if $(GO_UNITS),go-verify) $(if $(PY_PKGS),py-verify))
 TEST_GATE := $(if $(VERIFY_HALVES),dip-verify)
 
+# Conditional the same way as TEST_GATE: nothing to check without a workspace, and the
+# script lands on the branch that adds one.
+MOD_GATE := $(if $(wildcard go.work),$(if $(wildcard scripts/go-mod-check.sh),go-mod-check))
+
 # Keyed on discovered units, not directory existence: build output (.coverage, __pycache__)
 # can leave a package directory on disk after checking out a branch that does not carry it.
 GENERATE_HALVES := $(strip $(if $(filter packages/pylibs/dip,$(PY_PKGS)),py-generate) \
@@ -48,7 +52,7 @@ GO_GEN_NOISE := -e '/^[[:space:]]*\/\/ [A-Za-z0-9_]+ corresponds to the JSON sch
 
 .PHONY: help units doctor test coverage build lock lock-check lock-upgrade \
         py-test py-coverage py-verify go-test go-coverage go-verify go-work-sync \
-        dip-verify dip-generate dip-corpus py-generate go-generate
+        dip-verify dip-generate dip-corpus py-generate go-generate go-mod-check
 
 help:
 	@echo "doctor        check this machine has the tools this repo needs"
@@ -66,6 +70,7 @@ help:
 	@echo "go-coverage   run the Go units' coverage against their floors"
 	@echo "go-verify     prove the Go modules have no third-party dependencies"
 	@echo "go-work-sync  add every module under packages/golibs to go.work"
+	@echo "go-mod-check  prove every workspace module stands up without go.work"
 	@echo "dip-verify    run whichever halves of the dependency gate this branch has"
 	@echo "dip-generate  regenerate the DIP types for the languages on this branch"
 	@echo "dip-corpus    regenerate the DIP conformance corpus"
@@ -81,7 +86,7 @@ units:
 doctor:
 	@./scripts/doctor.sh
 
-test: $(TEST_GATE)
+test: $(TEST_GATE) $(MOD_GATE)
 	@$(if $(UNITS),:,echo "no units on this branch -- nothing to test")
 	@for unit in $(UNITS); do \
 		echo "== $$unit"; \
@@ -140,6 +145,9 @@ lock-upgrade:
 go-work-sync:
 	@test -d packages/golibs || { echo "go-work-sync: packages/golibs is not on this branch"; exit 1; }
 	go work use -r ./packages/golibs
+
+go-mod-check:
+	@./scripts/go-mod-check.sh
 
 # The generated code must not smuggle in a runtime library nobody chose.
 dip-verify: $(VERIFY_HALVES)

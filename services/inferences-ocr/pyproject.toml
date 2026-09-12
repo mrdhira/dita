@@ -11,22 +11,15 @@ dependencies = [
     "numpy>=2.5,<3",
     "pillow>=12.3,<13",
     "pyyaml>=6.0.3,<7",
-    # Not opencv-python-headless: rapidocr depends on the non-headless distribution, and
-    # asking for headless as well would land two copies of cv2 in the image. The Dockerfile
-    # installs the GL and glib shared libraries this one links against.
+    # Not opencv-python-headless: rapidocr needs the non-headless distribution, and asking
+    # for both lands two copies of cv2 in the image.
     "opencv-python>=5.0,<6",
 ]
 
-# Dev-only. PEP 735 groups are never part of [project.dependencies], so they cannot
-# reach the runtime image: the Dockerfile exports with --no-default-groups.
 [dependency-groups]
-dev = [
-    "coverage>=7.6,<8",
-]
+dev = ["coverage>=7.6,<8"]
 
-[tool.setuptools]
-packages = ["ocr_worker", "ocr_worker.engines"]
-
-[build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+[tool.uv]
+# An application, not a library: uv installs its dependencies but never builds or
+# publishes it. Shared code under packages/ stays installable.
+package = false

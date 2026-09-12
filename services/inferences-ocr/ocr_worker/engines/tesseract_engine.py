@@ -1,20 +1,11 @@
 """The system tesseract binary, driven through its TSV output.
 
-Why the binary and not a library. Tesseract is a C++ program, not a Python package.
-`pytesseract` is a thin wrapper that shells out to this same binary and re-parses the same
-TSV, so it would add a dependency and buy nothing: we need the TSV anyway, because that is
-the only output carrying per-word boxes and confidences.
+The binary owns everything, so this adapter only folds its one-row-per-word TSV back into
+lines. We call it directly rather than through `pytesseract`, which shells out to the same
+binary and re-parses the same TSV we need anyway for boxes.
 
-Where this engine sits in the pipeline. The binary owns everything -- binarisation, layout
-analysis, line finding, recognition, and its own confidence scores. There is no
-preprocessing to do on our side and no logits to soften; the only thing this adapter does
-after the fact is fold tesseract's one-row-per-word TSV back into lines and reshape it into
-the common `Result`. Contrast with `manga_ocr_engine`, which ships a bare graph and leaves
-the whole pipeline to us.
-
-On quality. Good on clean printed Latin text. Poor on Japanese, measured: for an image
-reading `日本語のテキスト認識` it returns `AA 告 の テキ ス ト 認識`, where PP-OCRv5 is exact.
-It stays in the registry as a cheap, dependency-free baseline, never as the default.
+Good on clean printed Latin text, poor on Japanese: for `日本語のテキスト認識` it returns
+`AA 告 の テキ ス ト 認識`, where PP-OCRv5 is exact. A baseline, never the default.
 """
 
 from __future__ import annotations

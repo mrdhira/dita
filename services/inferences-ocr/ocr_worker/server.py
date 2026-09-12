@@ -32,24 +32,15 @@ class SocketDirectoryError(Exception):
 class Health:
     """Liveness, readiness and startup, as protocol ops rather than URL paths.
 
-    The names follow the Kubernetes convention -- `livez` and `readyz`, plus a startup
-    probe -- because the semantics are the ones everybody already knows. (`healthz` is
-    the deprecated spelling and is not offered.) There is no HTTP surface here to hang
-    them off, and adding one purely for probes would mean a TCP listener, an HTTP parser
-    and a second transport to secure; a container healthcheck is an exec probe instead:
+    Kubernetes names, because the semantics are the familiar ones (`healthz` is deprecated
+    and not offered). No HTTP surface here, so a container healthcheck is an exec probe:
     `python -m ocr_worker --probe ready`.
 
-    Which probe means what:
-
-      livez    the process and its accept loop are up. No dependency checks, nothing that
-               can fail slowly. False means restart me.
-      readyz   I can be given work: socket bound, registry parsed, models dir writable,
-               and either something is resident or a load could still proceed. False means
-               stop routing to me. Note that a cold load does NOT make this false -- a
-               load in flight is progress, not a wedge -- so `resident` in the response is
-               what tells you whether an `infer` would succeed this instant.
-      startupz the one-time boot work finished: socket bound and registry parsed. This is
-               what keeps a slow first start from being killed by a liveness check.
+      livez    process and accept loop are up; no dependency checks. False: restart me.
+      readyz   can be given work. A load in flight is progress, not a wedge, so a cold
+               load does not make this false -- `resident` says whether `infer` would
+               succeed right now. False: stop routing to me.
+      startupz boot finished: socket bound, registry parsed. False: still booting.
     """
 
     def __init__(self, manager: ModelManager) -> None:

@@ -226,7 +226,7 @@ wheels = [
 [[package]]
 name = "inferences-ocr"
 version = "0.1.0"
-source = { editable = "services/inferences-ocr" }
+source = { virtual = "services/inferences-ocr" }
 dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },

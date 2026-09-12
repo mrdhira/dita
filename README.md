@@ -113,9 +113,27 @@ Working notes and plans live under `.claude/tasks/`; anything durable graduates 
 Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under
 `.claude/rules/` are still empty.
 
-**Python dependencies are one uv workspace.** The root `pyproject.toml` is a virtual
-workspace root and every service under `services/inferences-*` resolves into the single
-[`uv.lock`](uv.lock) beside it. Bounds live in each service's `pyproject.toml`; exact
-versions and hashes live in the lock, which is committed. Dependabot is the only update
-mechanism — its `uv` ecosystem reads that pair and can move transitive packages, which is
-what a flat requirements file never exposed.
+## Python dependencies
+
+One uv workspace, one lock.
+
+**Why a `pyproject.toml` in two places.** The root one *is* the workspace definition: it has
+no `[project]` table, so it is virtual and not installable, and its only job is to list the
+members. Each service needs its own because each has its own identity, its own dependencies
+and its own `requires-python`. Neither can do the other's job.
+
+**The lock is single and lives at the root**, and it should stay that way. A workspace
+resolves as one set, so every service agrees on the version of anything they share. Adding a
+per-service lock would reintroduce exactly the per-service resolution the workspace removed,
+and give two files the authority to disagree.
+
+Bounds live in each service's `pyproject.toml`; exact versions and hashes live in
+[`uv.lock`](uv.lock), which is committed. `.python-version` at the root pins the interpreter
+for the one workspace virtualenv, so uv never has to guess.
+
+**Services are applications, not libraries.** Each sets `[tool.uv] package = false`, so uv
+installs its dependencies but never builds or publishes it — they appear in the lock as
+`virtual`. Shared code under `packages/` stays installable and appears as `editable`.
+
+**Dependabot is the only update mechanism.** Its `uv` ecosystem reads the root manifest plus
+the lock and can move transitive packages, which a flat requirements file never exposed.

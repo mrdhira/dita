@@ -1,27 +1,18 @@
 """RapidOCR over PP-OCRv5 ONNX weights, ONNXRuntime only.
 
-Where this engine sits in the pipeline. RapidOCR's package *is* the whole pipeline:
-resize and normalise, the DBNet detector, box extraction and unclipping, optional angle
-classification, the CRNN recogniser, and the CTC decode -- argmax over the per-timestep
-softmax, collapse repeats, drop the blank class, average the kept probabilities into a
-line confidence. None of that is ours to write, and reimplementing it would only be a way
-to introduce bugs. This adapter is thin on purpose.
+The library owns the whole pipeline -- detection, recognition, CTC decode and confidences --
+so this adapter is thin on purpose. The only knobs set here, and why:
 
-So the only knobs we set are the ones with a real reason:
-
-  det_model / rec_model   the two ONNX files our fetcher pinned and verified, instead of
-                          letting RapidOCR download its own copies at first use
-  rec_keys_from           the label set, because the PaddlePaddle export carries no
-                          `character` metadata (see `_materialise_rec_keys`)
-  use_cls  = false        the 180-degree angle classifier is a third model file for a case
-                          our inputs do not have; RapidOCR's vertical padding covers the
-                          rest. Turn it on and add the cls file to models.yaml if that
-                          stops being true.
+  det_model / rec_model   the ONNX files our fetcher pinned, instead of letting RapidOCR
+                          download its own
+  rec_keys_from           the label set: the PaddlePaddle export carries no `character`
+                          metadata (see `_materialise_rec_keys`)
+  use_cls  = false        the angle classifier is a third model file for a case our inputs
+                          do not have
   text_score = 0.5        RapidOCR's own default, stated rather than inherited silently
-  log_level  = error      the library logs per-call at info; our own logging is enough
+  log_level  = error      the library logs per call at info
 
-Everything before and after that is the library's. The only real work here is BGR channel
-order on the way in, and reshaping RapidOCR's parallel tuples into `Result` on the way out.
+The rest is BGR channel order in, and RapidOCR's parallel tuples reshaped into `Result` out.
 """
 
 from __future__ import annotations

@@ -14,11 +14,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Protocol, Tuple
 
 from .registry import ModelFile, ModelSpec
 
 LOG = logging.getLogger(__name__)
+
+
+class MetricsSink(Protocol):
+    """What the fetcher needs from metrics. Kept structural so this module imports nothing."""
+
+    def fetched(self, byte_count: int) -> None: ...
 
 DEFAULT_HF_ENDPOINT = "https://huggingface.co"
 READ_CHUNK = 1024 * 1024
@@ -57,7 +63,9 @@ def model_dir(models_dir: Path, spec: ModelSpec) -> Path:
     return models_dir / spec.id
 
 
-def ensure_model(models_dir: Path, spec: ModelSpec) -> List[Path]:
+def ensure_model(
+    models_dir: Path, spec: ModelSpec, metrics: Optional["MetricsSink"] = None
+) -> List[Path]:
     """Make every file of `spec` present and valid under $MODELS_DIR/<id>/.
 
     Files already present with the right digest are left alone. Returns the local paths
@@ -74,10 +82,12 @@ def ensure_model(models_dir: Path, spec: ModelSpec) -> List[Path]:
         )
 
     target_dir = model_dir(models_dir, spec)
-    return [_ensure_file(target_dir, spec, spec_file) for spec_file in spec.files]
+    return [_ensure_file(target_dir, spec, spec_file, metrics) for spec_file in spec.files]
 
 
-def _ensure_file(target_dir: Path, spec: ModelSpec, spec_file: ModelFile) -> Path:
+def _ensure_file(
+    target_dir: Path, spec: ModelSpec, spec_file: ModelFile, metrics: Optional["MetricsSink"] = None
+) -> Path:
     destination = target_dir / spec_file.dest
 
     if destination.exists():
@@ -138,6 +148,8 @@ def _ensure_file(target_dir: Path, spec: ModelSpec, spec_file: ModelFile) -> Pat
 
     partial.replace(destination)
     _remember(destination, spec_file.sha256)
+    if metrics is not None:
+        metrics.fetched(written)
     LOG.info("%s: %s verified (%s)", spec.id, spec_file.dest, spec_file.sha256[:12])
     return destination
 

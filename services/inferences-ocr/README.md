@@ -19,6 +19,7 @@ docker compose -f deployment/docker-compose.yml up --build inferences-ocr
 - **Not HTTP.** `AF_UNIX` `SOCK_SEQPACKET`, same kernel, no TCP stack and no HTTP parser — see [Why](#why)
 - **Three models selectable:** PP-OCRv5 (default), the system tesseract binary, and manga-ocr for Japanese vertical text
 - Health probes are protocol ops, not URLs: `livez`, `readyz`, `startupz`
+- **Metrics are HTTP**, on their own small port — a scrape is not the workload
 
 ## What is this?
 
@@ -26,6 +27,24 @@ A long-lived Python process that holds exactly one OCR model and answers request
 socket. It owns model residency and inference. It does not own the queue, the retry policy,
 the resource budget, or the decision about which model should be loaded — all of that belongs
 to `services/dita-orchestrator`, which is the only thing that talks to it.
+
+**This service is now mostly composition.** The socket server, the model manager, the
+registry reader, the digest-checking fetcher, the health contract and the metrics surface
+all live in [`packages/pylibs/dita-worker`](../../packages/pylibs/dita-worker); the wire is
+[`packages/pylibs/dip`](../../packages/pylibs/dip). What is left here is the part that is
+actually about OCR: three engine adapters, `models.yaml`, and a 36-line entrypoint that
+hands the framework an engine factory and a `Worker` describing this service.
+
+### What is here, and what is the framework's
+
+Everything that is not OCR lives in [`packages/pylibs/dita-worker`](../../packages/pylibs/dita-worker):
+the registry reader, the digest-verifying fetcher, the one-model-resident manager, the socket
+server, the health probes and the CLI. `inferences-stt` will use the same code.
+
+What this service owns is what makes it an *OCR* worker: the three engine adapters under
+`ocr_worker/engines/`, the `models.yaml` beside them, and a `__main__.py` that hands the
+framework a `Worker` — this service's name and version, the engine names to advertise, and
+the factory that turns an engine name into an adapter. The framework never names an engine.
 
 ### The registry
 
@@ -84,8 +103,9 @@ MODELS_DIR=./models SOCKET_PATH=../../run/inferences-ocr.sock \
     uv run --package inferences-ocr python -m ocr_worker
 ```
 
-Dependencies are declared in `services/inferences-ocr/pyproject.toml` and resolved in the
-single `uv.lock` at the repo root. There is no `requirements.txt`: the image build generates
+Dependencies are declared in `services/inferences-ocr/pyproject.toml` — including
+`dita-worker`, a workspace source rather than a version — and resolved in the single
+`uv.lock` at the repo root. There is no `requirements.txt`: the image build generates
 a pinned, hash-carrying export from the lock and installs that.
 
 Useful flags: `--preload <model id>`, `--log-level debug`, `--registry` for a different
@@ -93,7 +113,19 @@ Useful flags: `--preload <model id>`, `--log-level debug`, `--registry` for a di
 
 ### From Python
 
-There is no HTTP debug mode. This is the whole client:
+The protocol is a package: [`packages/pylibs/dip`](../../packages/pylibs/dip), stdlib only,
+and this worker speaks it through the same code a caller does.
+
+```python
+import dip
+
+with dip.Requester.connect("../../run/inferences-ocr.sock") as worker:
+    print(worker.list_models()["models"])
+    worker.load("rapidocr-ppocrv5")
+    print(worker.infer(open("page.png", "rb").read())["text"])
+```
+
+There is no HTTP debug mode. Without the package, this is the whole client:
 
 ```python
 import json, socket
@@ -128,6 +160,12 @@ A complete, stdlib-only reference client lives in
 orchestrator will follow.
 
 ### The wire protocol
+
+DIP, version 2. The IDL is [`specs/dip/dip.schema.json`](../../specs/dip/dip.schema.json),
+the prose is [`docs/protocol/[1]dip-specification.md`](../../docs/protocol/%5B1%5Ddip-specification.md),
+and the implementation this worker uses is
+[`packages/pylibs/dip`](../../packages/pylibs/dip) — the framing below is that package, not
+a copy of it. What follows is the part a caller of *this* service needs.
 
 **Transport:** `AF_UNIX` / `SOCK_SEQPACKET` at `$SOCKET_PATH`, mode `0660`. Protocol 2.
 
@@ -328,18 +366,23 @@ without running `make lock` and the image build fails. Note that `--frozen` is *
 flag for this — it refuses to update the lock but does not check it, and will export a stale
 one and exit 0.
 
-66 tests at two levels, described in full in the
+26 tests here, and 80 in [`packages/pylibs/dita-worker`](../../packages/pylibs/dita-worker/README.md#tests)
+over the framework this service used to contain. The two levels are described in full in the
 [technical requirement](../../docs/inferences/ocr/%5B1%5Dtechnical-requirement.md#testing).
 
 **Tables** (`subTest`, one row per case) for everything pure: the Tesseract TSV fold and the
-command we build for it, the manga-ocr decode loop, the RapidOCR result assembly, the engine
-factory, registry validation, fetcher refusals, and the exact line `--probe` prints. These
-are the OCR logic, and they were added because the three engine adapters had been at 0%
-coverage while the plumbing around them was tested hard.
+command we build for it, the manga-ocr decode loop, the RapidOCR result assembly, and the
+engine factory. These are the OCR logic, and they were added because the three engine
+adapters had been at 0% coverage while the plumbing around them was tested hard.
 
-**Scenarios** (plain methods, deliberately not tables) for everything stateful: a stalled
-peer, the connection cap, a cold load in flight, concurrent loads, a failed fetch. Each
-needs its own threads and teardown and fails in its own way; a table would hide that.
+**The wiring**, in `ServiceIdentityTest`: the name, version and engine tuple this service
+hands the framework, and that every engine named in `models.yaml` has an adapter behind it.
+A stale engine tuple is visible on the wire and no OCR test would catch it.
+
+Registry validation, fetcher refusals, the one-model-resident scenarios, the socket server,
+the health probes, the framing and the exact line `--probe` prints moved with the code they
+cover; they are in the package's suite now, against a fake engine and a three-model fixture
+manifest rather than these weights.
 
 The engine tables were validated by mutation — twelve deliberate breakages of the code they
 cover, all twelve caught by the specific row that should catch them.
@@ -348,8 +391,8 @@ Not covered on purpose: the three engine constructors, which open real ONNX sess
 need weights on disk; anything requiring the network; and model accuracy, which is a
 property of the weights and is checked by the end-to-end run instead.
 
-There is no linter configured yet; `.claude/rules/PYTHON-CODE-GUIDELINES.md` is still empty,
-so house style here is "match the file you are in".
+There is no linter configured yet. House style is in
+[`.claude/rules/PYTHON-CODE-GUIDELINES.md`](../../.claude/rules/PYTHON-CODE-GUIDELINES.md).
 
 ### Adding a model
 
@@ -359,7 +402,9 @@ so house style here is "match the file you are in".
 3. Add the entry to `models.yaml`. A file may override `repo`/`revision`, which is how
    `rapidocr-ppocrv5` assembles its detector and recogniser from two different repos.
 4. If the engine is not `rapidocr`, `tesseract` or `manga_ocr`, add an adapter under
-   `ocr_worker/engines/`: subclass `Engine`, implement `infer`, register the name.
+   `ocr_worker/engines/`: subclass `dita_worker.Engine`, implement `infer`, then add the
+   name to `ENGINE_NAMES` and a branch to `build_engine` — the handshake advertises that
+   tuple, and `__main__.py` is what hands both to the framework.
 5. Run the tests — they assert every downloadable file carries a 64-character digest.
 
 ## Suggestions

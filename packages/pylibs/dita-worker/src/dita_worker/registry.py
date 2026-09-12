@@ -1,4 +1,8 @@
-"""Parsing of models.yaml into the shapes the rest of the worker uses."""
+"""Parsing of models.yaml into the shapes the rest of the worker uses.
+
+The one file in this package that is not stdlib-only: a model manifest is YAML, and the
+service that owns the manifest points `Worker.registry_path` at it.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-
-DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "models.yaml"
 
 # An id becomes a directory name under $MODELS_DIR, so it has to be one safe path
 # segment -- the same guarantee `dest` already gets.
@@ -82,7 +84,7 @@ class Registry:
         return [self.models[k].summary() for k in self.models]
 
 
-def load_registry(path: Path = DEFAULT_REGISTRY_PATH) -> Registry:
+def load_registry(path: Path) -> Registry:
     if not path.is_file():
         raise RegistryError(f"registry not found at {path}")
 

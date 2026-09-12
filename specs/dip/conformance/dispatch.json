@@ -1,0 +1,211 @@
+{
+  "corpus": "dip-dispatch",
+  "protocol": 2,
+  "note": "Op-level agreement, one layer above framing. Each case is a decoded control block; both implementations must reach the same verdict. `accept` means the op and its fields are well-formed and dispatch proceeds -- what happens next depends on receiver state and is not this corpus's business.",
+  "op_fields": {
+    "handshake": [],
+    "version": [],
+    "list": [],
+    "load": [
+      "id",
+      "model"
+    ],
+    "unload": [],
+    "infer": [],
+    "livez": [],
+    "readyz": [],
+    "startupz": []
+  },
+  "cases": [
+    {
+      "name": "handshake",
+      "control": {
+        "op": "handshake"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "version is an alias for handshake",
+      "control": {
+        "op": "version"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "list",
+      "control": {
+        "op": "list"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "load by id",
+      "control": {
+        "op": "load",
+        "id": "rapidocr-ppocrv5"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "load by the model alias",
+      "why": "the one op where `model` is meaningful",
+      "control": {
+        "op": "load",
+        "model": "tesseract"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "unload",
+      "control": {
+        "op": "unload"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "infer",
+      "control": {
+        "op": "infer"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "each health probe",
+      "control": {
+        "op": "readyz"
+      },
+      "expect": {
+        "outcome": "accept"
+      }
+    },
+    {
+      "name": "an op nobody implements",
+      "why": "the message must name what was sent so a typo is findable",
+      "control": {
+        "op": "teleport"
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request",
+        "message_contains": "teleport"
+      }
+    },
+    {
+      "name": "no op at all",
+      "control": {},
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request"
+      }
+    },
+    {
+      "name": "op of the wrong type",
+      "control": {
+        "op": 7
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request"
+      }
+    },
+    {
+      "name": "infer carrying a model field",
+      "why": "a caller naming a model wants that model; running the resident one answers a different question",
+      "control": {
+        "op": "infer",
+        "model": "manga-ocr"
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request",
+        "message_contains": "load"
+      }
+    },
+    {
+      "name": "an undeclared field on list",
+      "why": "refused, never ignored: silent tolerance hides typos",
+      "control": {
+        "op": "list",
+        "verbose": true
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request",
+        "message_contains": "verbose"
+      }
+    },
+    {
+      "name": "an undeclared field on load",
+      "control": {
+        "op": "load",
+        "id": "tesseract",
+        "nonsense": 1
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request",
+        "message_contains": "nonsense"
+      }
+    },
+    {
+      "name": "an undeclared field on a health probe",
+      "control": {
+        "op": "livez",
+        "deep": true
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request",
+        "message_contains": "deep"
+      }
+    },
+    {
+      "name": "load with no id",
+      "control": {
+        "op": "load"
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request",
+        "message_contains": "id"
+      }
+    },
+    {
+      "name": "load with a non-string id",
+      "why": "an id becomes a directory name and a registry key; stringifying a number invents a model, refusing it names the caller's bug",
+      "control": {
+        "op": "load",
+        "id": 7
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request"
+      }
+    },
+    {
+      "name": "load with a null id",
+      "control": {
+        "op": "load",
+        "id": null
+      },
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request"
+      }
+    }
+  ]
+}

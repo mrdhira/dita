@@ -24,7 +24,7 @@ from typing import Any, Dict, List
 import numpy as np
 from PIL import Image
 
-from .base import Engine, Line, Result
+from dita_worker import Engine, Line, Result
 
 SPECIAL_TOKENS = ("[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]")
 

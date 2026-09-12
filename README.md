@@ -14,8 +14,53 @@ nothing else.
 | `services/inferences-stt` | Python | Speech to text. | placeholder |
 | `services/inferences-tts` | Python | Text to speech. | placeholder |
 
-Shared packages live under `packages/`. Deployment lives in
-[`deployment/docker-compose.yml`](deployment/docker-compose.yml).
+Deployment lives in [`deployment/docker-compose.yml`](deployment/docker-compose.yml).
+
+## Shared packages
+
+`packages/` is organised **language-first**, because the tooling is:
+
+```
+packages/
+  golibs/
+    dip/            the protocol: framing, both roles, generated types
+  pylibs/
+    dip/            the same protocol, the same generated types, in Python
+    dita-worker/    everything an inference worker does except the inference
+```
+
+A worker service is now composition: `dita-worker` brings the socket server, the one-model
+manager, the registry reader, the digest-checking fetcher, the health probes, the CLI and
+the metrics, and the service brings an engine and a `models.yaml`. That claim is held up by
+a test in the package that builds a complete working worker from a fake engine and drives
+it over a real socket, importing nothing from any service.
+
+Each toolchain globs only its own subtree — `[tool.uv.workspace] members` covers
+`packages/pylibs/*`, `go.work` covers modules under `packages/golibs/` — so neither tool
+tries to own the other's tree, and `packages/` itself is not a service.
+
+`go.work` takes no glob, so a new Go module is added with `make go-work-sync`
+(`go work use -r`), which expands it into the explicit list.
+
+**The one exception to language-first is the protocol.** DIP has a single
+language-neutral definition with two implementations, so it cannot live under either
+language's directory without one looking authoritative:
+
+```
+specs/dip/               the IDL (JSON Schema 2020-12) and the conformance corpus
+docs/protocol/           the prose specification
+packages/golibs/dip/     the Go implementation, types generated from the IDL
+packages/pylibs/dip/     the Python implementation, types generated from the IDL
+```
+
+See [the DIP specification](docs/protocol/%5B1%5Ddip-specification.md) for what the protocol
+is and why it is a new one rather than gRPC, Cap'n Proto, NDJSON or HTTP.
+
+**Generated code has zero third-party dependencies**, which is an acceptance criterion, not
+a preference. `make dip-verify` proves it both ways: `go list -deps` must report no
+module-path package, and an AST scan must find no import outside the standard library.
+`make dip-generate` regenerates both languages from the IDL; the output is committed. Both
+generators are dev-only tools and neither reaches a runtime image.
 
 ## Getting set up
 
@@ -46,11 +91,36 @@ workspace, so `doctor` asks uv what this repo would run rather than reading what
 `python3` happens to be first on your PATH. If it is missing, `uv python install 3.14`.
 
 ```bash
-make test        # every service's tests
-make coverage    # every service's coverage, reported per service
+make test        # every unit's tests, both languages
+make coverage    # every unit's coverage, reported per unit
 make build       # every service image
 docker compose -f deployment/docker-compose.yml up --build
 ```
+
+## Metrics
+
+Each worker serves Prometheus text on its own small HTTP port, separate from the workload
+protocol: DIP is the hot path and stays a unix socket, while a scrape is a different
+concern with different traffic. The port defaults to loopback and is never published to the
+host; compose binds it on the internal network so a scraper can reach it.
+
+The metrics stack is **opt-in**, because the default `up` should stay small:
+
+```bash
+docker compose -f deployment/docker-compose.yml \
+               -f deployment/compose.observability.yml \
+               --profile observability up -d
+```
+
+That runs [VictoriaMetrics](https://docs.victoriametrics.com/), which is the pick because
+**vmui replaces Grafana** — query, explore and graph at
+[localhost:8428/vmui](http://localhost:8428/vmui) with nothing else to run or configure.
+Without the profile flag nothing observability-related starts.
+
+Scrape targets live in
+[`deployment/observability/scrape.yml`](deployment/observability/scrape.yml). The Go
+orchestrator will expose its own `/metrics` later; its target is already written there,
+commented out, and the stack will scrape it with no other change.
 
 ## The Go ↔ Python contract, in brief
 
@@ -97,9 +167,15 @@ shape the orchestrator's client will take.
 
 Design documents live under `docs/`, one directory per service:
 
+- [`docs/protocol/[1]dip-specification.md`](docs/protocol/%5B1%5Ddip-specification.md)
+  — DIP: what it is, why it is a new protocol rather than gRPC or HTTP, the framing, the ops
+  and the versioning rules.
+- [`docs/protocol/[2]open-questions.md`](docs/protocol/%5B2%5Dopen-questions.md)
+  — two decisions waiting on Dhira: how far the response shape should generalise beyond OCR,
+  and what a minimal CI gate would need.
 - [`docs/inferences/ocr/[1]technical-requirement.md`](docs/inferences/ocr/%5B1%5Dtechnical-requirement.md)
-  — the OCR worker: context, the wire protocol, the per-engine pipeline boundaries, the
-  alternatives that lost, and the rollout.
+  — the OCR worker: context, the per-engine pipeline boundaries, the alternatives that lost,
+  the metrics contract, and the rollout.
 
 ## Repo conventions
 
@@ -109,14 +185,21 @@ under `packages/<name>/`; their design documents live under `docs/<area>/<name>/
 at the root accumulates service-specific detail.
 
 **Make is two layers.** The root [`Makefile`](Makefile) is repo-level only — `doctor`,
-`test`, `coverage`, `build`, `lock` — and delegates the rest to each service's own
-Makefile, which owns `test`, `coverage`, `run` and `image`. Coverage is reported per
-service, against that service's own code: one blended number would let a well-tested
-service hide an untested one.
+`test`, `coverage`, `build`, `lock`, and the DIP codegen targets — and delegates the rest to
+each unit's own Makefile, which owns `test`, `coverage` and whatever else that unit needs.
+
+A **unit** is anything with its own tests and its own coverage number: a service, a shared
+package, or an example. **Examples count as units.** They are code someone will copy, so
+they get the same treatment and their own number; folding them into the service they
+demonstrate would hide whether they are exercised at all.
+
+Coverage is reported per unit, against that unit's own code, in both languages. One blended
+number would let a well-tested unit hide an untested one.
 
 Working notes and plans live under `.claude/tasks/`; anything durable graduates to `docs/`.
-Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under
-`.claude/rules/` are still empty.
+Agent guidance is in [`AGENTS.md`](AGENTS.md), with the per-language rules in
+[`.claude/rules/`](.claude/rules/) — Python, Go and QA — and the subagents that read them in
+[`.claude/agents/`](.claude/agents/).
 
 ## Python dependencies
 
@@ -133,12 +216,36 @@ per-service lock would reintroduce exactly the per-service resolution the worksp
 and give two files the authority to disagree.
 
 Bounds live in each service's `pyproject.toml`; exact versions and hashes live in
-[`uv.lock`](uv.lock), which is committed. `.python-version` at the root pins the interpreter
-for the one workspace virtualenv, so uv never has to guess.
+[`uv.lock`](uv.lock), which is committed.
+
+**Python is pinned to an exact patch, 3.14.6**, in three places that must agree:
+[`.python-version`](.python-version) for the workspace virtualenv, `requires-python` in each
+service, and the base image tag `python:3.14.6-slim-trixie`. `make doctor` asserts the exact
+version rather than the minor, because a rolling tag changes what you shipped without
+changing anything you wrote.
 
 **Services are applications, not libraries.** Each sets `[tool.uv] package = false`, so uv
 installs its dependencies but never builds or publishes it — they appear in the lock as
 `virtual`. Shared code under `packages/` stays installable and appears as `editable`.
 
-**Dependabot is the only update mechanism.** Its `uv` ecosystem reads the root manifest plus
-the lock and can move transitive packages, which a flat requirements file never exposed.
+**Dependabot is the only update mechanism**, across three ecosystems: `uv` for the Python
+workspace, `docker` for the pinned base image, and `gomod` for the Go modules. The `uv`
+ecosystem reads the root manifest plus the lock and can move transitive packages, which a
+flat requirements file never exposed.
+
+## Go modules
+
+Every `go.mod` carries `go 1.27.1` and [`go.work`](go.work) carries both `go 1.27.1` and
+`toolchain go1.27.1`, matching [`.tool-versions`](.tool-versions). `make doctor` fails if any
+of them drift. The compiler on your `PATH` is not what builds this repo; these directives are.
+
+A `go` directive at the full patch **is** the pin, and a `toolchain` directive is only
+meaningful in a `go.mod` when it names a version *newer* than the `go` line. Setting both to
+1.27.1 makes the module untidy: `go build` refuses with "updates to go.mod needed" and
+`go mod tidy` deletes the line. `go.work` is the one file that accepts both.
+
+[`go.work.sum`](go.work.sum) and the `go.sum` of every stdlib-only module are committed
+while empty, so the layout is complete from day one. **An empty lockfile is not a lock** —
+they stay empty until that module takes a third-party dependency, and the `gomod` Dependabot
+entry is what notices the day one arrives. `services/dita-orchestrator` already has real
+dependencies, so its `go.sum` has real content.

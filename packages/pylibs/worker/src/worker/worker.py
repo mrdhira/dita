@@ -1,10 +1,5 @@
-"""What a service tells the framework about itself.
-
-This is the seam. Everything below it -- the registry reader, the fetcher, the manager, the
-server, the CLI -- is the same code for every inference worker; everything a worker does not
-share is in this one object, constructed once at startup and passed down. Nothing here
-imports an engine, and nothing under it may.
-"""
+"""What a service tells the framework about itself: the seam between the shared worker
+framework and the one object a service supplies. Nothing here imports an engine."""
 
 from __future__ import annotations
 
@@ -17,11 +12,8 @@ from .engines import EngineFactory
 
 @dataclass(frozen=True)
 class Worker:
-    """The identity a peer sees in the handshake, plus the one thing only a service knows.
-
-    `engines` is advertised, not enforced: a name in models.yaml that `build_engine` refuses
-    is an `unsupported_engine` error at load time, which is where the caller can act on it.
-    """
+    """The identity a peer sees in the handshake. `engines` is advertised, not enforced: a
+    name in models.yaml that `build_engine` refuses is `unsupported_engine` at load time."""
 
     name: str
     version: str

@@ -1,11 +1,10 @@
 """The one-model-at-a-time model manager.
 
-Invariant: at most one engine is resident, always. ``load`` releases the previous engine
-before constructing the next one, so the two never overlap and the memory budget is the
-largest single model rather than the sum.
+Invariant: at most one engine is resident. ``load`` releases the previous engine before
+constructing the next, so the memory budget is the largest single model, not the sum.
 
-Downloading happens **outside** the exclusive lock and **before** anything is released, so
-a slow or failing fetch neither blocks in-flight inference nor evicts a working model.
+Downloading happens outside the exclusive lock and before anything is released, so a slow
+or failing fetch neither blocks in-flight inference nor evicts a working model.
 """
 
 from __future__ import annotations
@@ -44,16 +43,16 @@ class ModelManager:
 
         # Guards the resident engine and every swap of it. Held only for fast work.
         self._lock = threading.Lock()
-        # Serialises downloads so two callers cannot fetch the same files at once. Never
-        # held together with _lock, so a download blocks nothing but another download.
+        # Serialises downloads. Never held together with _lock, so a download blocks
+        # nothing but another download.
         self._fetch_lock = threading.Lock()
 
         self._engine: Optional[Engine] = None
         # One attribute so a lock-free reader can never see a half-updated pair.
         self._resident: Optional[Tuple[ModelSpec, float]] = None
         self._loading: Optional[str] = None
-        # Sticky until the next successful load or an unload. Readiness uses it to tell a
-        # worker that simply has nothing loaded yet from one whose last load failed.
+        # Sticky until the next successful load or an unload, so readiness can tell a
+        # worker with nothing loaded from one whose last load failed.
         self._last_error: Optional[str] = None
 
     @property
@@ -110,8 +109,8 @@ class ModelManager:
             raise
 
     def _load(self, spec: ModelSpec, started: float) -> Dict[str, Any]:
-        # Phase 1: get the bytes on disk. No exclusive lock, nothing released yet, so the
-        # currently resident model keeps serving and survives a failed fetch untouched.
+        # Phase 1: get the bytes on disk. No exclusive lock and nothing released yet, so
+        # the resident model keeps serving and survives a failed fetch untouched.
         with self._fetch_lock:
             self._loading = spec.id
             try:
@@ -120,9 +119,7 @@ class ModelManager:
                 self._loading = None
 
         # Phase 2: swap. Release first, build second -- the invariant, not an oversight.
-        # A build that fails here leaves nothing resident, which is the honest outcome:
-        # keeping the old engine alive while constructing the new one would mean two
-        # models in memory, and silently rebuilding the old one could fail just as well.
+        # A build that fails here leaves nothing resident, which is the honest outcome.
         with self._lock:
             already = self._already_resident(spec)
             if already is not None:
@@ -131,9 +128,8 @@ class ModelManager:
             previous = self._resident[0].id if self._resident else None
             self._release()
             if previous is not None and self._metrics is not None:
-                # Here rather than after a successful build: the eviction is real the
-                # moment the engine is released, and the most interesting eviction is the
-                # one whose build then fails and is never seen at all.
+                # The eviction is real the moment the engine is released, and the most
+                # interesting eviction is the one whose build then fails.
                 self._metrics.evicted(previous)
             engine = self._build_engine(
                 spec.engine, fetcher.model_dir(self._models_dir, spec), spec.options

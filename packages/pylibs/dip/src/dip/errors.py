@@ -1,9 +1,4 @@
-"""The two shapes every response has, and the taxonomy of the failing one.
-
-`code` is the contract and `message` is prose: a caller branches on the code and logs the
-message. ErrorCode is re-exported from the generated types rather than written again here,
-because a taxonomy spelled out twice is a taxonomy that drifts from the IDL.
-"""
+"""The two shapes every response has: `code` is the contract, `message` is prose."""
 
 from __future__ import annotations
 

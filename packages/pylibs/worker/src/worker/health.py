@@ -10,16 +10,11 @@ from .manager import ModelManager
 
 
 class Health:
-    """What each probe is allowed to be false for.
+    """What each probe is allowed to be false for. Kubernetes names and semantics
+    (`healthz` is deprecated and not offered); health is a DIP op, not a URL path.
 
-    Kubernetes names, because the semantics are the familiar ones (`healthz` is deprecated
-    and not offered). Health lives on the DIP socket, not on the metrics port, so a
-    container healthcheck is an exec probe: `python -m <worker> --probe ready`.
-
-      livez    process and accept loop are up; no dependency checks. False: restart me.
-      readyz   can be given work. A load in flight is progress, not a wedge, so a cold
-               load does not make this false -- `resident` says whether `infer` would
-               succeed right now. False: stop routing to me.
+      livez    process and accept loop are up. False: restart me.
+      readyz   can be given work; a cold load is progress, not a wedge. False: stop routing.
       startupz boot finished: socket bound, registry parsed. False: still booting.
     """
 

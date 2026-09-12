@@ -1,8 +1,7 @@
 """The unix-socket server: AF_UNIX / SOCK_SEQPACKET at $SOCKET_PATH.
 
-The orchestrator owns the queue and the resource budget, so this server keeps no queue
-of its own. It accepts connections, and the manager's exclusive lock serialises the work
-behind them.
+The orchestrator owns the queue and the resource budget, so this server keeps none of its
+own: it accepts, and the manager's exclusive lock serialises the work behind them.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ MAX_CONNECTIONS = 16
 # Kubernetes-shaped probe names, mapped to the Health method that answers them.
 PROBE_OPS = {"livez": "live", "readyz": "ready", "startupz": "startup"}
 # What this worker implements, which is what `handshake` advertises. Which fields each op
-# declares, and the refusal of anything else, belong to the protocol: `dip.validate`.
+# declares belongs to the protocol: `dip.validate`.
 KNOWN_OPS = ("handshake", "version", "list", "load", "unload", "infer", *PROBE_OPS)
 
 
@@ -56,10 +55,8 @@ def dispatch(
     op = control.get("op")
     response = _dispatch(worker, manager, control, payload, health)
     if metrics is not None:
-        # The op comes off the wire, so it is peer input: an unknown one is counted under
-        # a fixed label. `dip.validate` refuses it, but the metric is recorded afterwards,
-        # and a peer looping on random names would otherwise grow this dict without bound
-        # inside a hard memory limit.
+        # The op is peer input, so an unknown one is counted under a fixed label: a peer
+        # looping on random names would otherwise grow this dict inside a hard memory limit.
         name = op if isinstance(op, str) and op in KNOWN_OPS else "unknown"
         body = response.get("error")
         if response.get("ok"):
@@ -68,9 +65,7 @@ def dispatch(
             metrics.op(name, "error")
             metrics.error(str(body.get("code", ErrorCode.internal)))
         else:
-            # `ok` false with no error body is a health probe reporting a verdict, not a
-            # failure: a worker whose models directory goes read-only answers `readyz`
-            # honestly, and that is not an internal error.
+            # `ok` false with no error body is a probe reporting a verdict, not a failure.
             metrics.op(name, "fail")
     return response
 
@@ -114,7 +109,7 @@ def _dispatch(
         if op == "infer":
             return ok(**manager.infer(payload))
         # Unreachable while KNOWN_OPS matches dip.OPS; reached the day the protocol
-        # declares an op this worker has not implemented yet.
+        # declares an op this worker has not implemented.
         return error(ErrorCode.internal, f"op {op!r} is declared but not implemented here")
 
     except RegistryError as exc:
@@ -185,8 +180,8 @@ class SocketServer:
                 try:
                     thread.start()
                 except RuntimeError:
-                    # The slot is released by the thread that never ran, so it has to be
-                    # released here instead; otherwise the cap shrinks by one for good.
+                    # Released by the thread that never ran, so it has to be released
+                    # here or the cap shrinks by one for good.
                     LOG.exception("could not start a connection thread")
                     self._slots.release()
                     connection.close()

@@ -1,11 +1,6 @@
-"""Which ops exist, which fields each one declares, and what refusing looks like.
-
-The layer above framing and below the work: by the time `validate` returns None the op is
-known and its fields are well-formed, and what happens next depends on receiver state.
-
-Undeclared fields are refused, never ignored. Silent tolerance hides a typo in a client and
-turns a client bug into a server behaviour, so the rule here is the opposite of the one a
-requester applies to a response. `specs/dip/conformance/dispatch.json` is the corpus.
+"""Op dispatch: which ops exist and which fields each declares. Undeclared fields are
+refused, never ignored -- silent tolerance turns a client typo into a server behaviour.
+`specs/dip/conformance/dispatch.json` is the corpus.
 """
 
 from __future__ import annotations
@@ -14,7 +9,7 @@ from typing import Any
 
 from .errors import ErrorCode, error
 
-# Fields each op declares besides `op`. `load` is the only op where `model` means anything.
+# `load` is the only op where `model` means anything.
 OP_FIELDS: dict[str, frozenset[str]] = {
     "handshake": frozenset(),
     "version": frozenset(),
@@ -42,8 +37,7 @@ def validate(control: dict[str, Any]) -> dict[str, Any] | None:
 
     unexpected = sorted(set(control) - {"op"} - (declared or frozenset()))
     if unexpected and declared is not None:
-        # A caller naming a model wants that model; running the resident one would answer
-        # a different question, so this refusal points at `load` rather than listing fields.
+        # A caller naming a model wants that model, so the refusal points at `load`.
         if op == "infer" and "model" in unexpected:
             return error(ErrorCode.bad_request, INFER_MODEL_HINT)
         return error(
@@ -59,9 +53,7 @@ def validate(control: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _load_target_refusal(control: dict[str, Any]) -> dict[str, Any] | None:
-    """`load` needs one string. An id becomes a directory name and a registry key, so a
-    number stringified into one invents a model that was never asked for; naming the
-    caller's bug is the only useful answer."""
+    """`load` needs one string: an id becomes a directory name and a registry key."""
     for field in ("id", "model"):
         value = control.get(field)
         if value is not None and not isinstance(value, str):

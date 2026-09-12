@@ -1,10 +1,7 @@
-# Tasks for this package only. Run from here, or via the root Makefile.
-
 PACKAGE := dip
 UV      := uv run --package $(PACKAGE) --locked
 
-# A tripwire, not a target: a test that asserts nothing raises coverage just as well as a
-# test that asserts something. Set just below what the suite reaches.
+# A tripwire, not a target: set just below what the suite reaches.
 COVERAGE_FLOOR := 97
 
 .PHONY: help test coverage

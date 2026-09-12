@@ -1,9 +1,5 @@
-"""What every engine adapter has to look like, and how the framework asks for one.
-
-The framework never names an engine. A service supplies `build_engine`, and the only thing
-declared here is the shape both sides agree on: a factory takes a name from models.yaml and
-returns something with `infer` and `close`.
-"""
+"""The shape every engine adapter has. The framework never names an engine: a service
+supplies `build_engine`."""
 
 from __future__ import annotations
 
@@ -35,11 +31,8 @@ class Result:
 
 
 class Engine(abc.ABC):
-    """A loaded model. Constructed once by the manager, released on unload.
-
-    Implementations do the expensive work (opening ONNX sessions, reading dictionaries)
-    in ``__init__`` so that ``load`` on the wire means "ready to infer".
-    """
+    """A loaded model. Implementations do the expensive work (opening ONNX sessions, reading
+    dictionaries) in ``__init__``, so ``load`` on the wire means "ready to infer"."""
 
     def __init__(self, model_dir: Path, options: Dict[str, Any]) -> None:
         self.model_dir = model_dir
@@ -54,11 +47,8 @@ class Engine(abc.ABC):
 
 
 class UnknownEngine(Exception):
-    """models.yaml names an engine the service does not implement.
-
-    Raised by a service's factory, not here: the framework knows the name it was given and
-    nothing else. `dispatch` turns it into `unsupported_engine`.
-    """
+    """models.yaml names an engine the service does not implement. Raised by a service's
+    factory; `dispatch` turns it into `unsupported_engine`."""
 
 
 # engine name from models.yaml, the model's directory, its options -> a built engine.

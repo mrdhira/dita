@@ -1,13 +1,7 @@
-"""DIP -- the Dita Inference Protocol, version dip/2.
+"""DIP -- the Dita Inference Protocol, version dip/2: framing, error taxonomy, both roles.
 
-One implementation of the wire for every Python peer: the framing, the error taxonomy, and
-both roles. Types are generated from `specs/dip/dip.schema.json`; everything else here is
-behaviour a schema cannot express, kept honest by `specs/dip/conformance/`.
-
-    from dip import Requester, error, ok, recv_message, send_message
-
-Stdlib only, deliberately: a library every worker links must not drag a supply chain
-behind it.
+Types are generated from `specs/dip/dip.schema.json`; `specs/dip/conformance/` keeps this
+implementation and the Go one agreeing. Stdlib only, deliberately.
 """
 
 from __future__ import annotations

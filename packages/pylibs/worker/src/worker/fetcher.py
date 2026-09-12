@@ -1,7 +1,7 @@
 """Download a model's files into $MODELS_DIR and prove they are the expected bytes.
 
-Deliberately small: one HTTPS GET per file against the Hugging Face resolve endpoint,
-pinned to an immutable commit sha. No hub client, no auth, no symlink cache.
+One HTTPS GET per file against the Hugging Face resolve endpoint, pinned to an immutable
+commit sha. No hub client, no auth, no symlink cache.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ REQUEST_TIMEOUT = 120
 # endpoint cannot stream until the disk fills.
 MAX_UNDECLARED_BYTES = 2 * 1024 * 1024 * 1024
 
-# Files whose digest this process has already checked, keyed by path. Cleared implicitly
-# on restart, so a cold start still hashes everything once.
+# Files whose digest this process has already checked. Cleared on restart, so a cold
+# start still hashes everything once.
 _verified: Dict[str, Tuple[int, int, str]] = {}
 _verified_lock = threading.Lock()
 
@@ -66,11 +66,8 @@ def model_dir(models_dir: Path, spec: ModelSpec) -> Path:
 def ensure_model(
     models_dir: Path, spec: ModelSpec, metrics: Optional["MetricsSink"] = None
 ) -> List[Path]:
-    """Make every file of `spec` present and valid under $MODELS_DIR/<id>/.
-
-    Files already present with the right digest are left alone. Returns the local paths
-    in registry order.
-    """
+    """Make every file of `spec` present and valid under $MODELS_DIR/<id>/. Files already
+    present with the right digest are left alone. Returns local paths in registry order."""
     if not spec.needs_download:
         return []
 
@@ -169,11 +166,8 @@ def _stream_to(url: str, partial: Path, ceiling: int) -> int:
 
 
 def _already_verified(path: Path, sha256: str) -> bool:
-    """True if this process already hashed exactly these bytes at this path.
-
-    Guards against re-hashing hundreds of megabytes on every load. The identity is
-    (size, mtime_ns, digest), so any rewrite of the file forces a fresh hash.
-    """
+    """True if this process already hashed exactly these bytes at this path. The identity is
+    (size, mtime_ns, digest), so any rewrite of the file forces a fresh hash."""
     try:
         stat = path.stat()
     except OSError:

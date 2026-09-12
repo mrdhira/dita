@@ -1,14 +1,9 @@
 """The requesting end of DIP: connect to a receiver's socket and perform ops.
 
-A failure is a response, not an exception. The receiver answers `{"ok": false, "error":
-{"code", "message"}}` and the caller branches on the code; only a connection that breaks
-raises. The handshake is explicit rather than automatic, because a one-shot caller -- a
-container health probe, say -- sends exactly one message and a forced round trip would
-double its cost.
-
-A requester must ignore response fields it does not recognise, which is why nothing here
-validates a response against the generated types: that is the one place in this protocol
-where tolerance is correct.
+A failure is a response, not an exception: the receiver answers with a code and the caller
+branches on it; only a broken connection raises. Nothing here validates a response against
+the generated types -- a requester must ignore fields it does not recognise, which is the
+one place in this protocol where tolerance is correct.
 """
 
 from __future__ import annotations
@@ -55,8 +50,7 @@ class Requester:
 
     @classmethod
     def connect(cls, socket_path: Path | str, timeout: float | None = SEND_TIMEOUT) -> "Requester":
-        """Dial a receiver. `timeout` covers the connect and every exchange after it;
-        construct a Requester directly for timeouts that differ per phase."""
+        """Dial a receiver. `timeout` covers the connect and every exchange after it."""
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         try:
             sock.settimeout(timeout)
@@ -80,11 +74,8 @@ class Requester:
 
     def handshake(self) -> dict[str, Any]:
         """Once per connection: check `protocol` and adopt the limits the peer advertises.
-
-        A peer speaking another wire version raises rather than answering, because every
-        op after this one would be framed against a guess. Everything else this returns is
-        the receiver's own description of itself, for the caller to read.
-        """
+        A peer speaking another wire version raises rather than answering, because every op
+        after this one would be framed against a guess."""
         response = self.call("handshake")
         if not response.get("ok"):
             return response

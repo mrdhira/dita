@@ -1,11 +1,8 @@
 """The receiving end of DIP: one open connection, read a message, answer it.
 
-Binding, the accept loop and any connection cap stay with the service. Those are policy --
-how many peers to hold, what to log, when to stop -- and a receiver owns them. What is
-protocol, and therefore here, is the exchange on one connection: which framing failure
-gets which error code, and the rule that a response we cannot send is still answered --
-unless the peer stopped reading part-way through it, when a second message would be read
-as the rest of the first one.
+Binding and the accept loop are the service's policy. What is protocol is the exchange on
+one connection: which framing failure gets which code, and the rule that a response we
+cannot send is still answered -- unless the peer stopped reading part-way through it.
 """
 
 from __future__ import annotations
@@ -34,8 +31,7 @@ LOG = logging.getLogger(__name__)
 # How long to let a refused peer read its answer before hanging up.
 REFUSAL_DRAIN_SECONDS = 0.5
 
-# One request in, one response out. Whatever the handler raises is the service's problem:
-# a receiver answers with a code, it does not let an op kill the connection loop.
+# One request in, one response out. Whatever the handler raises is answered with a code.
 Handler = Callable[[dict[str, Any], bytes], dict[str, Any]]
 
 
@@ -79,9 +75,8 @@ def send_response(
         send_message(connection, response, b"", send_timeout, limits)
         return True
     except ProtocolError as exc:
-        # Over a ceiling, and `encode_message` refuses before the first datagram, so
-        # nothing of this response is on the wire: a refusal now is a whole message and
-        # the peer is owed it rather than a dropped connection.
+        # `encode_message` refuses before the first datagram, so nothing of this response
+        # is on the wire and the peer is owed a whole refusal rather than a dropped socket.
         LOG.warning("could not send a response: %s", exc)
         try:
             send_message(
@@ -93,9 +88,8 @@ def send_response(
             LOG.debug("the refusal could not be sent either: %s", also)
         return False
     except Timeout as exc:
-        # The peer stopped reading part-way through this response. Anything sent now would
-        # be read as the rest of it, so the only honest move is to stop talking. It is not
-        # `response_too_large` either: the response was fine, the peer is not.
+        # The peer stopped reading part-way through this response, so anything sent now
+        # would be read as the rest of it. Not `response_too_large`: the response was fine.
         LOG.warning("peer stopped reading a response: %s", exc)
         return False
     except OSError as exc:
@@ -108,11 +102,8 @@ def refuse(
     response: dict[str, Any],
     drain_seconds: float = REFUSAL_DRAIN_SECONDS,
 ) -> None:
-    """Answer a peer we are not going to serve, and make sure it can read the answer.
-
-    Closing a SOCK_SEQPACKET socket with data still queued resets it, and the peer would
-    see a bare ECONNRESET instead of the error code.
-    """
+    """Answer a peer we are not going to serve. Closing a SOCK_SEQPACKET socket with data
+    still queued resets it, and the peer would see ECONNRESET instead of the error code."""
     with connection:
         send_response(connection, response)
         try:

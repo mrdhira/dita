@@ -1,31 +1,12 @@
 """The DIP wire framing: a prologue, a chunked control block, a chunked payload.
 
-Transport is ``AF_UNIX`` / ``SOCK_SEQPACKET``: the kernel preserves message boundaries and
-ordering, so a message needs no length prefix -- only a count of the bytes that follow it.
+Transport is ``AF_UNIX`` / ``SOCK_SEQPACKET``, so message boundaries survive and a message
+needs no length prefix. Both sections are chunked because a single datagram cannot exceed
+``SO_SNDBUF`` (212992 bytes by default) -- ``send`` fails with EMSGSIZE rather than
+fragmenting, and a dense page's control block reaches that ceiling as readily as an image.
 
-A message is a JSON control block plus an optional binary payload (the image bytes on
-``infer``). **Both are chunked**, because a single AF_UNIX datagram cannot exceed
-``SO_SNDBUF`` (212992 bytes on a default Linux kernel) -- ``send`` fails with EMSGSIZE
-above that, it does not fragment. A dense page yields thousands of lines, so the control
-block hits that ceiling as readily as an image does.
-
-    datagram 0     : the prologue -- a small fixed-shape JSON object, always well under
-                     the ceiling: {"protocol", "control_len", "payload_len"}
-    next datagrams : the control block, in chunks of at most MAX_CHUNK bytes
-    next datagrams : the payload, in chunks of at most MAX_CHUNK bytes
-
-A length of 0 means that section sends no datagrams at all. Since no conforming datagram
-is ever empty, an empty read means the peer closed.
-
-MAX_CHUNK is the only size a peer has to agree on, and ``handshake`` advertises it along
-with the control and payload ceilings. Every function here takes the ``Limits`` in force,
-because a requester frames with what its peer advertised rather than with these defaults.
-The receive buffer is exactly that ``max_chunk``; a peer that sends a larger datagram is
-caught by MSG_TRUNC rather than silently truncated.
-
-Decoding is written against a datagram reader rather than a socket, so the conformance
-corpus can drive the same code the socket drives. ``socket_reader`` is the only place that
-knows about a file descriptor.
+Every function takes the ``Limits`` in force: a requester frames with what its peer
+advertised, never with these defaults. The spec is docs/protocol/[1]dip-specification.md.
 """
 
 from __future__ import annotations
@@ -38,27 +19,23 @@ from typing import Any
 
 PROTOCOL_VERSION = 2
 
-# Comfortably under the default SO_SNDBUF so a chunk always fits in one datagram. This is
-# the default only: a connection frames with the `Limits` it negotiated, and the receive
-# buffer is that connection's `max_chunk`.
+# Comfortably under the default SO_SNDBUF so a chunk always fits in one datagram. A
+# connection frames with the `Limits` it negotiated, not with this.
 MAX_CHUNK = 64 * 1024
 RECV_BUFFER = MAX_CHUNK
 
-# Ceilings, mostly to keep a malformed peer from making us allocate forever. 8 MiB of
-# control block is roughly 70k OCR lines.
+# Ceilings, so a malformed peer cannot make us allocate forever.
 MAX_CONTROL = 8 * 1024 * 1024
 MAX_PAYLOAD = 64 * 1024 * 1024
 MAX_PROLOGUE = 4096
 
-# Seconds. IDLE applies while waiting for the next message on an open connection;
-# MESSAGE applies once a prologue has been read and the rest of the message is owed.
+# Seconds. IDLE waits for the next message; MESSAGE applies once a prologue is read.
 IDLE_TIMEOUT = 300.0
 MESSAGE_TIMEOUT = 30.0
 SEND_TIMEOUT = 30.0
 
 # One datagram as the kernel hands it over: the bytes, and whether more arrived than the
-# receive buffer could hold. A reader raises Timeout when the peer goes quiet and returns
-# empty bytes when it closes.
+# receive buffer could hold. A reader raises Timeout when the peer goes quiet.
 DatagramReader = Callable[[float | None], tuple[bytes, bool]]
 
 
@@ -77,7 +54,7 @@ class PeerGone(Exception):
 @dataclass(frozen=True)
 class Limits:
     """The sizes a connection frames with. Nothing on the wire may be hard-coded: a
-    receiver advertises its own in `handshake`, and a requester adopts what it is told."""
+    receiver advertises its own in `handshake`, a requester adopts what it is told."""
 
     max_chunk: int = MAX_CHUNK
     max_control: int = MAX_CONTROL
@@ -95,9 +72,8 @@ class Limits:
         }
 
     def adopt(self, advertised: Mapping[str, Any]) -> "Limits":
-        """These limits with whatever the peer advertised laid over them. A field it left
-        out, or left at zero, keeps the current value: a missing limit is not a limit of
-        nothing."""
+        """These limits with the peer's laid over them. A field left out, or left at zero,
+        keeps the current value: a missing limit is not a limit of nothing."""
         known = self.as_dict()
         taken = {
             field: value
@@ -249,9 +225,8 @@ def _decode_json_object(raw: bytes, what: str) -> dict[str, Any]:
 
 
 def _check_version(prologue: dict[str, Any]) -> None:
-    """A version the peer does not announce is this one -- the field is optional, and the
-    corpus says so. A version it does announce and we do not speak is the single failure
-    the field exists to catch, so it is refused rather than served."""
+    """A version the peer does not announce is this one -- the field is optional. A version
+    it announces and we do not speak is the failure this field exists to catch."""
     version = prologue.get("protocol")
     if version is not None and version != PROTOCOL_VERSION:
         raise ProtocolError(

@@ -1,8 +1,7 @@
 """The command line every worker gets: serve, preload, or answer one health probe.
 
-A service's `__main__` is expected to be three lines -- describe itself with a `Worker` and
-hand it to `main` -- so the flags, the env vars and the exit codes stay identical across
-workers and an operator learns them once.
+A service's `__main__` is three lines, so the flags, env vars and exit codes stay identical
+across workers and an operator learns them once.
 """
 
 from __future__ import annotations
@@ -28,8 +27,8 @@ LOG = logging.getLogger(__name__)
 DESCRIPTION = "One model resident at a time, answered over a unix socket."
 DEFAULT_MODELS_DIR = "/models"
 
-# --probe name -> the wire op that answers it. The Kubernetes spellings, because the
-# semantics are the ones everybody already knows.
+# --probe name -> the wire op that answers it. Kubernetes spellings, because the semantics
+# are the ones everybody already knows.
 PROBES = {"live": "livez", "ready": "readyz", "startup": "startupz"}
 PROBE_TIMEOUT = 5.0
 
@@ -78,12 +77,8 @@ def build_parser(worker: Worker) -> argparse.ArgumentParser:
 
 
 def run_probe(socket_path: Path, probe: str) -> int:
-    """Ask a running worker one health question over its own socket.
-
-    Deliberately tiny and dependency-free: a container healthcheck is an exec probe for a
-    service whose health lives on the DIP socket rather than on the metrics port, so this
-    has to work with nothing but the stdlib.
-    """
+    """Ask a running worker one health question over its own socket. Dependency-free on
+    purpose: a container healthcheck is an exec probe, so this must work with the stdlib."""
     op = PROBES[probe]
     try:
         with dip.Requester.connect(socket_path, PROBE_TIMEOUT) as requester:
@@ -98,12 +93,8 @@ def run_probe(socket_path: Path, probe: str) -> int:
 
 
 def probe_line(op: str, response: Dict[str, Any]) -> str:
-    """One line: the verdict, then something worth reading.
-
-    The verdict appears once. It used to appear twice, because the detail fell back to
-    `response["status"]`, which is the same word -- hence `readyz: pass pass`. The exit
-    code was right either way, which is why nobody noticed; the test asserts this string.
-    """
+    """One line: the verdict, then something worth reading. The verdict appears once, and a
+    test asserts this exact string."""
     if not response.get("ok"):
         return f"{op}: fail {'; '.join(response.get('reasons') or []) or 'no reason given'}"
 
@@ -151,7 +142,7 @@ def main(worker: Worker, argv: list[str] | None = None) -> int:
     server = SocketServer(worker, manager, Path(args.socket), metrics=collector)
 
     # Its own port, never the DIP socket: a scrape is not the workload. Loopback by
-    # default, so it is only reachable elsewhere when something says so explicitly.
+    # default, so it is only reachable elsewhere when something says so.
     try:
         address = metrics_mod.address_from_env()
     except ValueError as exc:

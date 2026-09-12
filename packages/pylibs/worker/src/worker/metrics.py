@@ -1,19 +1,10 @@
 """Prometheus text metrics, served on a small HTTP port of their own.
 
-A scrape is not the workload. DIP stays a unix socket because it is the hot path and
-carries megabytes; metrics are a few kilobytes of text on a timer, and every scraper in
-existence already speaks HTTP. Serving them here costs no runtime dependency: `http.server`
-and a dict.
+A scrape never touches the worker's lock: counters live under their own lock, held for a
+dict update and nothing else, and the gauges are read from `ModelManager`'s lock-free view.
+An inference in progress cannot be delayed by a scrape, or a scrape by an inference.
 
-Two rules this module exists to keep:
-
-**A scrape never touches the worker's lock.** Counters live under their own lock, held for
-a dict update and nothing else, and the gauges are read from `ModelManager`'s lock-free
-`resident`/`loading` view. An inference in progress cannot be delayed by a scrape, and a
-scrape cannot be delayed by an inference.
-
-**The numbers are real.** Every counter is incremented on the path it names; nothing here
-is a placeholder. A counter that never moves is worse than none, because it reads as
+Every counter is incremented on the path it names. A counter that never moves reads as
 "nothing is happening" rather than "nothing is measured".
 """
 
@@ -30,21 +21,19 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 LOG = logging.getLogger(__name__)
 
-# Seconds. Load is a download plus a session init; inference is a page. The buckets are
-# chosen to straddle what this worker actually does rather than to look tidy.
+# Seconds. Chosen to straddle what this worker actually does rather than to look tidy.
 LOAD_BUCKETS = (0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0)
 INFER_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0)
 
 DEFAULT_ADDR = "127.0.0.1:9109"
 
-# Seconds a scrape connection may sit idle before it is closed. HTTP/1.1 keep-alive means
-# a client that connects and says nothing otherwise pins a thread forever.
+# Seconds a scrape connection may sit idle. HTTP/1.1 keep-alive otherwise lets a client
+# that connects and says nothing pin a thread forever.
 REQUEST_TIMEOUT = 10.0
-# Live scrape connections. The DIP socket has a cap for the same reason; this port is
-# smaller but just as reachable, and this process has one memory budget.
+# Live scrape connections. This port is smaller than the DIP socket but just as reachable.
 MAX_SCRAPES = 8
 
-# Linux reports the resident set in pages; statm's second field is the current one.
+# Linux reports the resident set in pages; statm second field is the current one.
 PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 STATM = "/proc/self/statm"
 
@@ -76,9 +65,9 @@ class Histogram:
         self.totals[key] = self.totals.get(key, 0) + 1
 
     def snapshot(self) -> Tuple[Dict[str, List[int]], Dict[str, float], Dict[str, int]]:
-        """A copy to render outside the lock. The bucket lists are copied too: `observe`
-        mutates them in place, and sharing one would let a scrape emit a bucket above the
-        `+Inf` bucket and above `_count`, which silently corrupts histogram_quantile."""
+        """A copy to render outside the lock. The bucket lists are copied too: sharing one
+        would let a scrape emit a bucket above `+Inf` and above `_count`, which silently
+        corrupts histogram_quantile."""
         return (
             {key: list(counts) for key, counts in self.counts.items()},
             dict(self.sums),
@@ -98,7 +87,7 @@ class Metrics:
         self.loads: Dict[str, int] = {}
         self.evictions = 0
         # The last model this worker had resident. The gauges keep naming it after it is
-        # gone, so the series goes to zero instead of vanishing and an alert can see it.
+        # gone, so the series goes to zero instead of vanishing.
         self.last_model: Optional[str] = None
         self.fetched_bytes = 0
         self.fetched_files = 0
@@ -122,9 +111,8 @@ class Metrics:
             self.last_model = model_id
 
     def evicted(self, model_id: str) -> None:
-        """A resident model was released to make room for another. Counted where the
-        release happens, not where the load succeeds: a build that then fails has still
-        evicted, and that is the eviction worth seeing."""
+        """A resident model was released to make room for another. Counted where the release
+        happens, not where the load succeeds: a build that then fails has still evicted."""
         with self._lock:
             self.evictions += 1
             self.last_model = model_id
@@ -161,7 +149,7 @@ class Metrics:
 
         resident = manager.resident() if manager is not None else None
         loading = manager.loading if manager is not None else None
-        # Empty is how Prometheus spells "no label": a worker that has never loaded
+        # Empty is how Prometheus spells "no label", so a worker that has never loaded
         # anything reports the same series it always did.
         model = (resident["id"] if resident else None) or loading or last_model or ""
         usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -169,9 +157,8 @@ class Metrics:
         out: List[str] = []
 
         def emit(name: str, kind: str, help_text: str, samples: Iterable[Tuple[str, Any]]) -> None:
-            # The family is declared even with no samples in it. A counter that only
-            # appears after its first event reads as a metric nobody exports, and both
-            # rate() and absent() misbehave against a worker that has just started.
+            # Declared even with no samples: a counter that only appears after its first
+            # event makes both rate() and absent() misbehave on a fresh worker.
             out.append(f"# HELP {name} {help_text}")
             out.append(f"# TYPE {name} {kind}")
             out.extend(f"{name}{label} {value}" for label, value in samples)
@@ -214,8 +201,8 @@ class Metrics:
                         "Inference duration, excluding load.",
                         INFER_BUCKETS, infer_hist, worker)
 
-        # All three carry `model`, always, so an unload takes the series to zero instead
-        # of deleting it. A label that changed with the value could not be alerted on.
+        # All three carry `model` always, so an unload takes the series to zero instead
+        # of deleting it: a label that changed with the value could not be alerted on.
         named = _labels([worker, ("model", model)])
         emit("dita_worker_model_resident", "gauge",
              "1 when a model is resident and able to answer infer right now.",
@@ -233,8 +220,8 @@ class Metrics:
         if resident_bytes is not None:
             emit("process_resident_memory_bytes", "gauge", "Resident set size, right now.",
                  [(_labels([worker]), resident_bytes)])
-        # Named for what it is. The question this worker's memory gauge has to answer is
-        # whether an eviction freed anything, and a high-water mark never falls.
+        # The question a memory gauge has to answer is whether an eviction freed
+        # anything, and a high-water mark never falls.
         emit("process_resident_memory_peak_bytes", "gauge",
              "Peak resident set size since the process started.",
              [(_labels([worker]), usage.ru_maxrss * 1024)])
@@ -260,8 +247,7 @@ def _emit_histogram(out: List[str], name: str, help_text: str, buckets: Tuple[fl
 
 def resident_memory_bytes(statm: str = STATM) -> Optional[int]:
     """Current RSS, which is the number an eviction is supposed to move. `ru_maxrss` is a
-    high-water mark and never falls, so it cannot answer that. None where there is no
-    /proc to read: a gauge that is not exported beats one that is wrong."""
+    high-water mark and never falls, so it cannot answer that. None where there is no /proc."""
     try:
         with open(statm, "r", encoding="ascii") as handle:
             fields = handle.read().split()
@@ -287,12 +273,9 @@ def address_family(host: str) -> int:
 
 
 class _ScrapeServer(http.server.ThreadingHTTPServer):
-    """ThreadingHTTPServer with a ceiling on live connections.
-
-    Keep-alive means a connection outlives its request, and a thread outlives the
-    connection, so without a cap a handful of clients that connect and never speak are
-    enough to exhaust the process. The DIP socket refuses at a cap for the same reason.
-    """
+    """ThreadingHTTPServer with a ceiling on live connections. Keep-alive means a connection
+    outlives its request and a thread outlives the connection, so without a cap a handful of
+    clients that connect and never speak are enough to exhaust the process."""
 
     daemon_threads = True
 
@@ -334,7 +317,7 @@ def serve(
         protocol_version = "HTTP/1.1"
         server_version = "worker-metrics"
         # Honoured by StreamRequestHandler.setup(): a client that connects and sends
-        # nothing is closed rather than holding a thread until it feels like talking.
+        # nothing is closed rather than holding a thread.
         timeout = request_timeout
 
         def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
@@ -349,8 +332,8 @@ def serve(
             self.wfile.write(body)
 
         def version_string(self) -> str:
-            # The default appends the exact interpreter version, which tells an
-            # unauthenticated client which CPython to go and look up.
+            # The default appends the exact interpreter version, telling an unauthenticated
+            # client which CPython to go and look up.
             return self.server_version
 
         def log_message(self, fmt: str, *args: object) -> None:

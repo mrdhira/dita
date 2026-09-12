@@ -67,7 +67,8 @@ implementation; its [README](services/inferences-ocr/README.md) has the full pro
   op (`infer` for OCR), and the three health probes `livez`, `readyz` and `startupz`.
   Every response carries `ok`; failures carry a stable `error.code` plus a human
   `error.message`. `handshake` advertises the chunk size, the size ceilings and the socket
-  timeouts, so no client hard-codes them.
+  timeouts, so no client hard-codes them. A field an op does not declare is refused, not
+  ignored.
 - **One model resident per worker.** Several models are *selectable*; never two loaded.
   `load` evicts whatever was there and reports what it evicted, so the orchestrator can
   budget memory as the largest single model rather than the sum. The download happens
@@ -82,7 +83,7 @@ implementation; its [README](services/inferences-ocr/README.md) has the full pro
   reset.
 - **Health is three protocol ops, not three URLs.** `livez` means restart me, `readyz`
   means stop routing to me, `startupz` means I am still booting. A container healthcheck
-  is an exec probe: `python -m ocr_worker --probe ready`.
+  is an exec probe rather than an HTTP one; each worker's README gives its command.
 
 A stdlib-only Go reference client lives in
 [`services/inferences-ocr/examples/go`](services/inferences-ocr/examples/go/) and is the

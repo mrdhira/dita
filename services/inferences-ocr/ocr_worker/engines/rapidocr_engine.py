@@ -1,18 +1,9 @@
 """RapidOCR over PP-OCRv5 ONNX weights, ONNXRuntime only.
 
-The library owns the whole pipeline -- detection, recognition, CTC decode and confidences --
-so this adapter is thin on purpose. The only knobs set here, and why:
-
-  det_model / rec_model   the ONNX files our fetcher pinned, instead of letting RapidOCR
-                          download its own
-  rec_keys_from           the label set: the PaddlePaddle export carries no `character`
-                          metadata (see `_materialise_rec_keys`)
-  use_cls  = false        the angle classifier is a third model file for a case our inputs
-                          do not have
-  text_score = 0.5        RapidOCR's own default, stated rather than inherited silently
-  log_level  = error      the library logs per call at info
-
-The rest is BGR channel order in, and RapidOCR's parallel tuples reshaped into `Result` out.
+The library owns the whole pipeline, so this adapter is thin. The knobs set here point it at
+the ONNX files our fetcher pinned rather than letting it download its own, hand it a label
+set the PaddlePaddle export does not carry (see `_materialise_rec_keys`), and turn off the
+angle classifier, a third model file for a case our inputs do not have.
 """
 
 from __future__ import annotations
@@ -85,12 +76,9 @@ class RapidOcrEngine(Engine):
 
 
 def _materialise_rec_keys(inference_yml: Path) -> Path:
-    """Write the CTC label set next to the model, taking it from the pinned yml.
-
-    The PaddlePaddle ONNX export carries no `character` metadata, which is where RapidOCR
-    normally reads the label set from, so we hand it a plain keys file instead. The yml
-    is itself checksummed by the fetcher, so the derived file inherits that provenance.
-    """
+    """Write the CTC label set next to the model, taking it from the pinned yml. The
+    PaddlePaddle ONNX export carries no `character` metadata, which is where RapidOCR
+    normally reads it from. The yml is checksummed by the fetcher, so this inherits that."""
     keys_path = inference_yml.parent / REC_KEYS_FILENAME
     if keys_path.exists():
         return keys_path

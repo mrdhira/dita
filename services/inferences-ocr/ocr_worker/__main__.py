@@ -1,9 +1,5 @@
-"""Entry point: python -m ocr_worker
-
-Everything this file does not say is `worker`'s: the flags, the socket server, the
-one-model-resident manager, the fetcher and the health probes. What is OCR is the engine
-factory and the manifest beside it.
-"""
+"""Entry point: python -m ocr_worker. Everything this file does not do is `worker`'s;
+what is OCR is the engine factory and the manifest beside it."""
 
 from __future__ import annotations
 

@@ -1,11 +1,5 @@
-"""Engine adapters, looked up by the `engine` field in models.yaml.
-
-Imports are lazy so that a missing optional dependency only breaks the engine that
-needs it, not the whole worker.
-
-`build_engine` and `ENGINE_NAMES` are the two things `worker` cannot know: the
-framework is handed this factory at startup and never names an engine itself.
-"""
+"""Engine adapters, looked up by the `engine` field in models.yaml. Imports are lazy so a
+missing optional dependency breaks only the engine that needs it."""
 
 from __future__ import annotations
 

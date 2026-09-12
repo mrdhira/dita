@@ -1,5 +1,4 @@
-# Context is the repo root; keep everything but the manifests, lock, worker source and the
-# pylibs this service depends on out.
+# Context is the repo root: exclude all but manifests, lock, worker source and pylibs.
 **/models/
 **/.venv/
 **/__pycache__/

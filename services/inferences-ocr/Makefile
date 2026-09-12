@@ -1,11 +1,8 @@
-# Tasks for this service only. Run from here, or via the root Makefile.
-
 PACKAGE   := inferences-ocr
 REPO_ROOT := $(CURDIR)/../..
 UV        := uv run --package $(PACKAGE) --locked
 
-# A tripwire, not a target: a test that asserts nothing raises coverage just as well as a
-# test that asserts something. Set just below what the suite reaches.
+# A tripwire, not a target: set just below what the suite reaches.
 COVERAGE_FLOOR := 87
 
 .PHONY: help test coverage run image

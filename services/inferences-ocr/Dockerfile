@@ -1,7 +1,6 @@
 # ONNXRuntime-only OCR worker. Build context is the REPO ROOT: uv.lock lives there and a
-# context cannot reach outside itself.
-# Exact patch and OS suffix: a rolling tag changes what ships, and the apt names below
-# are Debian-release specific.
+# context cannot reach outside itself. Exact patch and OS suffix, because a rolling tag
+# changes what ships and the apt names below are Debian-release specific.
 FROM ghcr.io/astral-sh/uv:0.12.13 AS uv
 
 FROM python:3.14.6-slim-trixie AS deps
@@ -16,12 +15,10 @@ COPY services/inferences-ocr/pyproject.toml services/inferences-ocr/pyproject.to
 COPY packages/pylibs/dip/pyproject.toml packages/pylibs/dip/pyproject.toml
 COPY packages/pylibs/worker/pyproject.toml packages/pylibs/worker/pyproject.toml
 
-# --locked, not --frozen: only --locked verifies the lock against the manifests, so a
-# bound edited without `make lock` fails the build here.
-# --no-default-groups keeps dev-only packages out of the runtime image.
-# --no-emit-package dip/worker: first-party source, copied in below like ocr_worker
-# rather than pip-installed -- an editable entry carries no hash and would fail
-# --require-hashes. Their own third-party dependencies stay in the export.
+# --locked, not --frozen: only --locked verifies the lock against the manifests, so a bound
+# edited without `make lock` fails the build here. --no-default-groups keeps dev-only
+# packages out. --no-emit-package dip/worker: first-party source, copied in below rather
+# than pip-installed -- an editable entry carries no hash and would fail --require-hashes.
 RUN uv export --package inferences-ocr --locked --no-emit-project \
         --no-emit-package dip --no-emit-package worker \
         --no-default-groups --no-cache -o /tmp/requirements.txt
@@ -64,8 +61,8 @@ RUN mkdir -p "$MODELS_DIR" "$(dirname "$SOCKET_PATH")" \
 
 USER ocr
 
-# An exec probe, not a curl of /metrics: health is a DIP op, so it reads the same
-# process state the workload does and does not depend on the metrics port.
+# An exec probe, not a curl of /metrics: health is a DIP op, so it reads the same process
+# state the workload does and does not depend on the metrics port.
 HEALTHCHECK --start-period=30s --interval=30s --timeout=10s --retries=3 \
     CMD ["python", "-m", "ocr_worker", "--probe", "ready"]
 

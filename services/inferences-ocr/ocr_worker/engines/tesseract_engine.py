@@ -1,11 +1,8 @@
 """The system tesseract binary, driven through its TSV output.
 
 The binary owns everything, so this adapter only folds its one-row-per-word TSV back into
-lines. We call it directly rather than through `pytesseract`, which shells out to the same
-binary and re-parses the same TSV we need anyway for boxes.
-
-Good on clean printed Latin text, poor on Japanese: for `日本語のテキスト認識` it returns
-`AA 告 の テキ ス ト 認識`, where PP-OCRv5 is exact. A baseline, never the default.
+lines. Good on clean printed Latin text, poor on Japanese, where PP-OCRv5 is exact: a
+baseline, never the default.
 """
 
 from __future__ import annotations

@@ -1,16 +1,8 @@
 """manga-ocr as two ONNX graphs plus a greedy decode loop.
 
-manga-ocr ships only an encoder graph, a decoder graph and a vocabulary; upstream's
-pipeline lives in torch, which this service will not depend on. So preprocessing, the
-decode loop and line assembly are all ours -- which is why this adapter looks nothing like
-`rapidocr_engine`, where the library owns the whole pipeline. Full comparison in
-docs/inferences/ocr/[1]technical-requirement.md.
-
-The exported decoder has no key/value cache, so each step re-runs it over the whole prefix.
-`argmax` picks the next token straight from the logits; the softmax in `_softmax_max` exists
-only to turn that winning logit into a comparable probability for the confidence field.
-
-One text block per call: give it a crop, not a page. There is no detector here.
+Upstream's pipeline is torch, which this service will not depend on, so preprocessing, the
+decode loop and line assembly are ours. The exported decoder has no key/value cache, so each
+step re-runs it over the whole prefix. One text block per call: give it a crop, not a page.
 """
 
 from __future__ import annotations
@@ -113,11 +105,8 @@ def _softmax_max(logits: np.ndarray) -> float:
 
 
 def _post_process(text: str) -> str:
-    """The whitespace and ellipsis tidy-up upstream manga-ocr applies to its output.
-
-    Upstream also runs jaconv half-width to full-width conversion; that is left out here
-    to keep the dependency set down, and is noted in the README.
-    """
+    """The whitespace and ellipsis tidy-up upstream manga-ocr applies. Upstream also runs
+    jaconv half-to-full-width conversion; left out to keep the dependency set down."""
     text = "".join(text.split())
     text = text.replace("…", "...")
     return re.sub(r"[・.]{2,}", lambda match: "." * (match.end() - match.start()), text)

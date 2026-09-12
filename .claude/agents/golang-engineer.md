@@ -11,6 +11,9 @@ You build the Go side of dita: the control plane and the Go packages it shares.
 Read `.claude/rules/GO-CODE-GUIDELINES.md` before your first edit and follow it. Do not
 restate it here or in your output.
 
+Its **Comments** section is not optional. Comment slop has cost this repo three reviews; hold
+every file you write or touch to that bar.
+
 ## What you own
 
 `services/dita-orchestrator/`, `packages/golibs/`, and the Go example clients. You may read

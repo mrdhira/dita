@@ -122,6 +122,18 @@ else
     fi
 fi
 
+# go.work resolves a sibling module for the compiler but not for `go mod tidy`, so a missing
+# local `replace` is invisible until someone tidies. Checked here, before they do.
+if [ ! -f "$GO_WORK" ]; then
+    :
+elif MODCHECK=$("$ROOT/scripts/go-mod-check.sh" 2>&1); then
+    pass modules "$(printf '%s\n' "$MODCHECK" | sed -n '$s/^go-mod-check: //p')"
+else
+    fail modules "a workspace module does not stand up without go.work" \
+        "add the lines below to that module's go.mod, then: make go-mod-check"
+    printf '%s\n' "$MODCHECK" | sed 's/^/        /'
+fi
+
 GIT_HAVE=$(command -v git >/dev/null 2>&1 && git --version 2>/dev/null | awk '{print $3}')
 check git git "any" "$GIT_HAVE" yes
 

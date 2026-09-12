@@ -36,6 +36,25 @@
 - Exported identifiers have doc comments beginning with the identifier's name.
 - Contexts are the first parameter and are honoured, not accepted and ignored.
 
+## Comments
+
+A comment exists to prevent a mistake. Nothing else earns its place.
+
+Keep: a non-obvious why (a footgun, a spec quirk, a limit that would surprise a reader); the
+contract a caller cannot infer from the code (what it guarantees, what it refuses); a build
+tag or a generated-file marker.
+
+Cut: what the code already says; how the file got here, what was tried, what went wrong
+before; a restated signature, field name or JSON key; section banners; anything a reviewer
+would call narration.
+
+Where the cut text belongs instead: the pull request description, `docs/`, or
+`.claude/tasks/lessons.md`. Not the source.
+
+The bar: a reader should find the file comparable to the Go standard library, which is close
+to comment-free. As a smell test, comment lines stay well under 10% of a source file; above
+that, the file is usually carrying prose that belongs somewhere else.
+
 ## Tests
 
 - **Table-driven with `t.Run(name, ...)`**, so a failure names the case.

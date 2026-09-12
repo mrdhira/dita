@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .base import Engine, Line, Result
+from worker import Engine, Line, Result
 
 TIMEOUT_SECONDS = 120
 

@@ -26,7 +26,7 @@ import numpy as np
 import yaml
 from PIL import Image
 
-from .base import Engine, Line, Result
+from worker import Engine, Line, Result
 
 LOG = logging.getLogger(__name__)
 

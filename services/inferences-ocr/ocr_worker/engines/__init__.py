@@ -2,6 +2,9 @@
 
 Imports are lazy so that a missing optional dependency only breaks the engine that
 needs it, not the whole worker.
+
+`build_engine` and `ENGINE_NAMES` are the two things `worker` cannot know: the
+framework is handed this factory at startup and never names an engine itself.
 """
 
 from __future__ import annotations
@@ -9,15 +12,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
-from .base import Box, Engine, Line, Result
+from worker import Engine, UnknownEngine
 
-__all__ = ["Box", "Engine", "Line", "Result", "build_engine", "ENGINE_NAMES"]
+__all__ = ["ENGINE_NAMES", "build_engine"]
 
 ENGINE_NAMES = ("rapidocr", "tesseract", "manga_ocr")
-
-
-class UnknownEngine(Exception):
-    """models.yaml names an engine this worker does not implement."""
 
 
 def build_engine(name: str, model_dir: Path, options: Dict[str, Any]) -> Engine:

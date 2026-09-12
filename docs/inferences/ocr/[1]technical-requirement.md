@@ -137,6 +137,29 @@ In-memory state is one engine, one `(spec, loaded_at)` tuple assigned as a unit 
 reader cannot see a half-updated pair, a `loading` id, and a sticky `last_error` from the most
 recent failed load.
 
+**The dependency model** is the third piece of committed state, and it is repo-wide rather
+than service-local. The root `pyproject.toml` is a **virtual uv workspace root** — no
+`[project]` table, only `[tool.uv.workspace]` with `members = ["services/inferences-*"]` — so
+every Python service resolves together into a single `uv.lock` at the repo root. Bounds are
+declared per service (`services/inferences-ocr/pyproject.toml`); exact versions and hashes
+live only in the lock. There is no `requirements.txt`.
+
+Three consequences, all deliberate:
+
+- **The Docker build context is the repo root.** The lock lives at the top and a build
+  context cannot reach outside itself, so `deployment/docker-compose.yml` sets
+  `context: ..` with `dockerfile: services/inferences-ocr/Dockerfile`. The image still
+  copies only this service's manifest, registry and source.
+- **The image installs from the lock, not from a loose file.** A first build stage runs
+  `uv export --package inferences-ocr --locked --no-emit-project`, producing a pinned
+  requirements file where every entry carries a sha256; the runtime stage installs it with
+  `pip --require-hashes`. uv itself never reaches the runtime image.
+- **`--locked` is the staleness guard**, and it is what allows dependency updates to be a
+  single tool. It verifies the lock against the manifests, so editing a bound without
+  re-running `uv lock` fails the build. `--frozen` is *not* equivalent: it declines to update
+  the lock but performs no check, exporting a stale lock and exiting 0. This was measured,
+  not assumed.
+
 ### Interfaces
 
 **Transport.** `AF_UNIX` / `SOCK_SEQPACKET` at `$SOCKET_PATH`, mode `0660`, on a directory
@@ -289,6 +312,19 @@ socket wide. This is the one house-style departure, and the socket is what conta
 the same binary and re-parses the same TSV we already need for boxes. A dependency for
 nothing.
 
+**A flat `requirements.txt` plus a weekly "what is outdated" workflow.** This is what shipped
+first, and it was two tools because one of them was half-blind: Dependabot could only move
+what the file declared, so a transitive package — `antlr4-python3-runtime`, pinned exactly by
+omegaconf, which rapidocr pulls in — was invisible to it and needed a workflow to report.
+Replaced by the workspace lock, which puts every transitive package in a file Dependabot's
+`uv` ecosystem reads and can update. The workflow is deleted; two mechanisms reporting on the
+same dependencies is a way to have neither owned.
+
+**A lockfile per service.** Rejected. Members of one monorepo that share a Python floor and
+will share packages should resolve together, or two services can disagree about the version
+of a shared transitive and nothing notices until both are in the same image. One lock also
+gives Dependabot one place to look and produces one grouped PR instead of one per service.
+
 ## Migration and rollout
 
 There is nothing to migrate. No existing OCR path, no data, no traffic to split.
@@ -368,7 +404,7 @@ them from the values it already receives.
   and the model cache, and nothing else.
 - **Untrusted input.** Image decoding happens in Pillow and OpenCV, which is the largest
   attack surface in the process. The payload cap is 64 MiB. This is the part most worth
-  keeping patched; `make deps-check` and the weekly workflow exist partly for that.
+  keeping patched; the lockfile and Dependabot exist partly for that.
 
 ## Testing
 

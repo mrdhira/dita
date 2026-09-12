@@ -1,0 +1,26 @@
+# Virtual workspace root: no [project] table, so nothing is built or published from here.
+# Its only job is to gather the service manifests under one resolution, which is what
+# produces the single uv.lock beside this file.
+#
+# One lock for the whole monorepo is deliberate. It is what lets Dependabot be the only
+# dependency tool: the `uv` ecosystem reads this pair and can move transitive packages
+# inside the lock, which a bare requirements.txt never exposed.
+
+[tool.uv.workspace]
+# A glob, so a future service joins the workspace by existing rather than by editing this
+# file. uv errors on a matched directory with no pyproject.toml, so the two placeholder
+# directories -- which hold a .gitkeep and nothing else -- are excluded until they become
+# real services. DELETE THE MATCHING LINE BELOW when you add a pyproject.toml to one of
+# them, or it will be silently left out of the lock.
+members = ["services/inferences-*"]
+exclude = [
+    "services/inferences-stt",
+    "services/inferences-tts",
+]
+
+[tool.uv]
+# The Python floor lives in each member's [project].requires-python (>=3.14, matching the
+# python:3.14-slim-trixie runtime image); uv has no root-level equivalent for a virtual
+# workspace, and rejects `requires-python` here. .tool-versions pins the exact patch for
+# local tooling and is left alone.
+required-version = ">=0.12"

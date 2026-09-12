@@ -79,9 +79,14 @@ The container starts with **no model loaded** — that is the orchestrator's cal
 ### Locally
 
 ```bash
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
-MODELS_DIR=./models SOCKET_PATH=../../run/inferences-ocr.sock .venv/bin/python -m ocr_worker
+uv sync --package inferences-ocr        # from the repo root; creates .venv from uv.lock
+MODELS_DIR=./models SOCKET_PATH=../../run/inferences-ocr.sock \
+    uv run --package inferences-ocr python -m ocr_worker
 ```
+
+Dependencies are declared in `services/inferences-ocr/pyproject.toml` and resolved in the
+single `uv.lock` at the repo root. There is no `requirements.txt`: the image build generates
+a pinned, hash-carrying export from the lock and installs that.
 
 Useful flags: `--preload <model id>`, `--log-level debug`, `--registry` for a different
 `models.yaml`, `--probe live|ready|startup` for a one-shot health check.
@@ -284,23 +289,40 @@ Memory and size:
 
 ```bash
 # build
-docker compose -f deployment/docker-compose.yml build inferences-ocr   # or: make build
+make build           # docker compose build, context = repo root
 
-# test — stdlib only, no network, no weights
-cd services/inferences-ocr && python -m unittest discover -s tests -t .  # or: make test
+# test — stdlib only, no network, no weights; uv syncs from the lock first
+make test
 
 # dependencies
-make deps-check      # uv pip list --outdated against the service venv
+make lock            # re-resolve uv.lock after editing a pyproject.toml
+make lock-check      # fail if uv.lock is stale — the same assertion the build makes
+make lock-upgrade    # re-resolve within the declared bounds
 ```
 
-Two things watch the dependencies, and they answer different questions. **Dependabot**
-(`.github/dependabot.yml`) reads `requirements.txt` and opens one grouped PR a week when a
-direct dependency has a newer release — something to review and merge. The **weekly
-`deps-check` workflow** installs the requirements and inspects the whole resolved tree, then
-opens or updates a single issue. It is the one that sees transitive packages: it is how
-`antlr4-python3-runtime` surfaced, pinned exactly by omegaconf, which rapidocr pulls in, so
-nothing in our `requirements.txt` can move it. That is an upstream report to wait on, not a
-PR to merge.
+### How dependencies are managed
+
+This service is a member of a **uv workspace** rooted at the repo. The root
+`pyproject.toml` is virtual — no `[project]` table, just `[tool.uv.workspace]` — and the
+whole monorepo resolves into one `uv.lock` beside it. Bounds live in each service's
+`pyproject.toml`; exact versions and hashes live in the lock.
+
+**The build context is the repo root**, not this directory, because the lock lives at the
+top and a Docker build context cannot reach outside itself. That is the only reason; the
+Dockerfile still copies nothing but this service's manifest, models registry and source.
+
+**Dependabot is the only update mechanism.** A weekly workflow used to run alongside it,
+because Dependabot reading a flat `requirements.txt` could not see transitive packages —
+`antlr4-python3-runtime`, pinned exactly by omegaconf, which rapidocr pulls in, was the
+case that proved it. With a lockfile that gap closes: Dependabot's `uv` ecosystem reads the
+root manifest plus `uv.lock` and updates packages inside the lock, transitive ones included.
+One tool, one grouped PR a week.
+
+**The guard that replaces the workflow** is in the Dockerfile: it exports the requirements
+with `uv export --locked`, which verifies the lock against the manifests. Edit a bound
+without running `make lock` and the image build fails. Note that `--frozen` is *not* the
+flag for this — it refuses to update the lock but does not check it, and will export a stale
+one and exit 0.
 
 54 tests covering the framing (a control block four times larger than `SO_SNDBUF`, a peer
 that announces a payload then stalls, a peer that closes mid-message, oversized datagrams),

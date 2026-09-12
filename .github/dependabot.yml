@@ -1,24 +1,20 @@
-# Dependabot watches the manifests; the weekly deps-check workflow watches the resolved
-# environment. They answer different questions and neither replaces the other.
+# The only dependency-update mechanism in this repo.
 #
-#   Dependabot        reads services/inferences-ocr/requirements.txt and opens a PR when a
-#                     direct dependency has a newer release that our bounds allow. It can
-#                     only move what we declare.
-#   deps-check        installs the requirements and runs `uv pip list --outdated` over the
-#                     whole resolved tree, then opens or updates one issue. It sees
-#                     transitive packages too -- which is how antlr4-python3-runtime
-#                     surfaced: omegaconf pins it exactly, rapidocr pulls in omegaconf, and
-#                     nothing in our requirements.txt can move it. That is an upstream
-#                     report, not a PR we can merge, so an issue is the right shape for it.
+# It used to be two: Dependabot read a requirements.txt of direct dependencies, and a
+# weekly workflow ran `uv pip list --outdated` over the resolved environment to catch the
+# transitive packages Dependabot could not see. The workspace lockfile removed the need for
+# the second one. Dependabot's `uv` ecosystem reads the root pyproject.toml plus uv.lock and
+# updates packages *inside the lock*, transitive ones included -- antlr4-python3-runtime,
+# the example that motivated the old workflow, is in uv.lock and therefore in scope here.
 #
-# In short: a Dependabot PR is something to review and merge; a deps-check issue is
-# something to read and usually to wait on.
+# Directory is `/` because that is where the virtual workspace root and the single lock
+# live; one entry covers every member under services/inferences-*.
 
 version: 2
 
 updates:
-  - package-ecosystem: pip
-    directory: /services/inferences-ocr
+  - package-ecosystem: uv
+    directory: /
     schedule:
       interval: weekly
       day: monday
@@ -28,7 +24,7 @@ updates:
     # a coupled stack, and bumping them separately means testing combinations that will
     # never ship together.
     groups:
-      inferences-ocr:
+      python-dependencies:
         patterns:
           - "*"
     open-pull-requests-limit: 3
@@ -38,4 +34,3 @@ updates:
     labels:
       - dependencies
       - python
-      - inferences-ocr

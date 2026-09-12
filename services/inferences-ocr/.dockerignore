@@ -1,6 +1,17 @@
-models/
-tests/
-__pycache__/
-*.pyc
-.venv/
-README.md
+# The build context is the repo root, so keep everything that is not a manifest, the lock,
+# or the worker source out of it.
+**/models/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+run/
+docs/
+packages/
+deployment/
+services/dita-orchestrator/
+services/inferences-ocr/tests/
+services/inferences-ocr/examples/
+services/inferences-ocr/README.md
+.claude/
+.github/
+.git/

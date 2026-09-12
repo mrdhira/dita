@@ -32,6 +32,25 @@ GOOD_BYTES = b"pretend these are model weights"
 GOOD_SHA = "68d8038c6e9a3441b0bcf0caebf52f563d112570cf95b50a869eae39c26bda46"
 
 
+def wait_until_listening(path: Path, timeout: float = 5.0) -> None:
+    """Block until the server at `path` accepts a connection.
+
+    Waiting for the socket *file* is not enough: it appears at bind(), which is before
+    listen(), so a connect in that window fails with ECONNREFUSED. Probing with a real
+    connection is the only wait that means what the caller wants.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as probe:
+                probe.settimeout(timeout)
+                probe.connect(str(path))
+                return
+        except OSError:
+            time.sleep(0.02)
+    raise AssertionError(f"no server listening at {path} after {timeout}s")
+
+
 class FakeEngine(Engine):
     """Records its own lifecycle so a test can see whether it is still alive.
 
@@ -686,12 +705,10 @@ class SocketServerTest(unittest.TestCase):
         self.server = SocketServer(manager, self.path, idle_timeout=10.0, message_timeout=0.5)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
-        for _ in range(100):
-            if self.path.exists():
-                break
-            time.sleep(0.05)
+        # Cleanups run last-registered-first: stop the accept loop, then join it.
         self.addCleanup(thread.join, 5)
         self.addCleanup(self.server.stop)
+        wait_until_listening(self.path)
 
     def connect(self) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -845,12 +862,10 @@ class ProbeCLITest(unittest.TestCase):
         server = SocketServer(manager, path, idle_timeout=10.0, message_timeout=5.0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        for _ in range(100):
-            if path.exists():
-                break
-            time.sleep(0.05)
+        # Cleanups run last-registered-first: stop the accept loop, then join it.
         self.addCleanup(thread.join, 5)
         self.addCleanup(server.stop)
+        wait_until_listening(path)
         return path
 
     def probe(self, path: Path, name: str) -> tuple:

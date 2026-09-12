@@ -1,8 +1,35 @@
 # ONNXRuntime-only OCR worker. No torch, no paddle, no CUDA.
 #
-# Python 3.14 to match .tool-versions. The OS suffix is pinned deliberately: the apt
-# package names below are Debian-release specific (trixie renamed libglib2.0-0 to
-# libglib2.0-0t64), so an unpinned `python:3.14-slim` would break on the next Debian bump.
+# The build context is the REPO ROOT, not this directory (see deployment/docker-compose.yml).
+# It has to be: the workspace root pyproject.toml and the single uv.lock live at the top of
+# the repo, and a build context cannot reach outside itself.
+#
+# Python 3.14 to match .tool-versions. The OS suffix is pinned deliberately: the apt package
+# names below are Debian-release specific (trixie renamed libglib2.0-0 to libglib2.0-0t64),
+# so an unpinned `python:3.14-slim` would break on the next Debian bump.
+
+# Pinned, never :latest -- this is the tool that decides which bytes get installed.
+FROM ghcr.io/astral-sh/uv:0.12.13 AS uv
+
+# Stage 1: turn the workspace lock into a fully pinned, hash-carrying requirements file for
+# this one member. uv stays in this stage; the runtime image never sees it.
+FROM python:3.14-slim-trixie AS deps
+
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /workspace
+
+# Only the manifests and the lock. Nothing here depends on the service source, so editing
+# the worker does not invalidate the dependency layer.
+COPY pyproject.toml uv.lock ./
+COPY services/inferences-ocr/pyproject.toml services/inferences-ocr/pyproject.toml
+
+# --locked, not --frozen. Both refuse to update the lock, but only --locked *verifies* it
+# against the manifests: `uv export --frozen` will happily export a stale lock and exit 0.
+# This line is the guard that replaces the old weekly deps-check workflow -- edit a bound in
+# a pyproject.toml without running `make lock` and the image build fails here.
+RUN uv export --package inferences-ocr --locked --no-emit-project --no-cache \
+        -o /tmp/requirements.txt
+
 FROM python:3.14-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,11 +53,14 @@ RUN useradd --system --create-home --uid 10001 --shell /usr/sbin/nologin ocr
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Every version and every hash comes from uv.lock. --require-hashes makes pip refuse a
+# wheel whose bytes do not match, and refuse the file at all if any entry lacks a hash.
+COPY --from=deps /tmp/requirements.txt ./requirements.lock.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock.txt \
+    && rm requirements.lock.txt
 
-COPY models.yaml ./
-COPY ocr_worker ./ocr_worker
+COPY services/inferences-ocr/models.yaml ./
+COPY services/inferences-ocr/ocr_worker ./ocr_worker
 
 # Both are bind mounts in deployment/docker-compose.yml. Creating them owned by `ocr`
 # keeps the non-root user able to write when the image is run without explicit mounts.

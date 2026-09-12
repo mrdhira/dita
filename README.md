@@ -74,4 +74,11 @@ Design documents live under `docs/`, one directory per service:
 Working notes and plans live under `.claude/tasks/`; anything durable graduates to `docs/`.
 Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under
 `.claude/rules/` are still empty. Repo-level tasks are in the [`Makefile`](Makefile)
-(`make build`, `make test`, `make deps-check`).
+(`make build`, `make test`, `make lock`, `make lock-check`).
+
+**Python dependencies are one uv workspace.** The root `pyproject.toml` is a virtual
+workspace root and every service under `services/inferences-*` resolves into the single
+[`uv.lock`](uv.lock) beside it. Bounds live in each service's `pyproject.toml`; exact
+versions and hashes live in the lock, which is committed. Dependabot is the only update
+mechanism — its `uv` ecosystem reads that pair and can move transitive packages, which is
+what a flat requirements file never exposed.

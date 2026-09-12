@@ -1,9 +1,0 @@
-rapidocr>=3.9.2,<4
-onnxruntime>=1.30,<2
-numpy>=2.5,<3
-pillow>=12.3,<13
-pyyaml>=6.0.3,<7
-
-# rapidocr depends on the non-headless opencv_python, so pin that one: asking for
-# opencv-python-headless would land two copies of cv2 in the image.
-opencv-python>=5.0,<6

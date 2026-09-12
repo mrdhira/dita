@@ -21,8 +21,11 @@ services:
 
   inferences-ocr:
     build:
-      context: ../services/inferences-ocr
-      dockerfile: Dockerfile
+      # The context is the repo root, not the service directory. The workspace root
+      # pyproject.toml and the single uv.lock live at the top of the repo, and a build
+      # context cannot reach outside itself.
+      context: ..
+      dockerfile: services/inferences-ocr/Dockerfile
     container_name: inferences-ocr
     environment:
       - SOCKET_PATH=/run/dita/inferences-ocr.sock

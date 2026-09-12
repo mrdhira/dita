@@ -14,7 +14,8 @@ services/inferences-*/models/*
 # Compiled Go example binaries (`go build` names them after the directory).
 services/inferences-ocr/examples/go/go
 
-# Python
+# Python. uv.lock is deliberately NOT here -- it is committed.
 __pycache__/
 *.py[cod]
 .venv/
+*.egg-info/

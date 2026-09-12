@@ -31,8 +31,8 @@ services:
       - SOCKET_PATH=/run/dita/inferences-ocr.sock
       - MODELS_DIR=/models
       - OCR_LOG_LEVEL=info
-      # Reachable on the compose network only: no ports entry publishes it. The worker's
-      # own default is loopback, so it is never exposed by accident elsewhere.
+      # Compose network only: no ports entry publishes it, and the worker defaults to
+      # loopback, so it is never exposed by accident elsewhere.
       - METRICS_ADDR=0.0.0.0:9109
     # Bind mounts, not named volumes: both directories live in the repo, so they can be
     # inspected with ls and reset with rm -rf. Their contents are gitignored; a .gitkeep
@@ -49,11 +49,9 @@ services:
     # The image's non-root user is uid 10001. Run as the invoking user instead so the
     # bind-mounted repo directories stay writable and the files it fetches stay yours.
     user: "${UID:-1000}:${GID:-1000}"
-    # An exec probe, not an HTTP one. The worker does serve HTTP for metrics, but health
-    # is a DIP op: the probe and the workload then answer from the same process state, and
-    # a metrics port that is down cannot make a healthy worker look dead. `readyz` stays
-    # true through a cold model load -- a load in flight is progress, not a wedge -- so the
-    # long start_period only has to cover process start and the socket bind.
+    # An exec probe, not an HTTP one: health is a DIP op, so a down metrics port cannot
+    # make a healthy worker look dead. `readyz` stays true through a cold load, so
+    # start_period only has to cover process start and the socket bind.
     healthcheck:
       test: ["CMD", "python", "-m", "ocr_worker", "--probe", "ready"]
       start_period: 30s

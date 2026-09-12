@@ -11,18 +11,19 @@ import logging
 import os
 import socket
 import threading
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import dip
 from dip import ErrorCode, error, ok
 
-from . import __version__
-from .engines import ENGINE_NAMES, UnknownEngine
+from .engines import UnknownEngine
 from .fetcher import ChecksumError, FetchError
+from .health import Health
+from .metrics import Metrics
 from .manager import ModelManager, NoModelLoaded
 from .registry import RegistryError
+from .worker import Worker
 
 LOG = logging.getLogger(__name__)
 
@@ -31,75 +32,6 @@ class SocketDirectoryError(Exception):
     """The socket directory cannot be used, with an explanation of what to change."""
 
 
-class Health:
-    """Liveness, readiness and startup, as protocol ops rather than URL paths.
-
-    Kubernetes names, because the semantics are the familiar ones (`healthz` is deprecated
-    and not offered). No HTTP surface here, so a container healthcheck is an exec probe:
-    `python -m ocr_worker --probe ready`.
-
-      livez    process and accept loop are up; no dependency checks. False: restart me.
-      readyz   can be given work. A load in flight is progress, not a wedge, so a cold
-               load does not make this false -- `resident` says whether `infer` would
-               succeed right now. False: stop routing to me.
-      startupz boot finished: socket bound, registry parsed. False: still booting.
-    """
-
-    def __init__(self, manager: ModelManager) -> None:
-        self._manager = manager
-        self._started_at = time.monotonic()
-        self._bound = False
-        self._stopped = False
-
-    def mark_bound(self) -> None:
-        self._bound = True
-
-    def mark_stopped(self) -> None:
-        self._stopped = True
-
-    def live(self) -> Dict[str, Any]:
-        failures = []
-        if self._stopped:
-            failures.append("the server is shutting down")
-        return self._verdict("livez", failures)
-
-    def startup(self) -> Dict[str, Any]:
-        failures = []
-        if not self._bound:
-            failures.append("the socket is not bound yet")
-        if not self._manager.registry.models:
-            failures.append("the registry parsed to no models")
-        return self._verdict("startupz", failures)
-
-    def ready(self) -> Dict[str, Any]:
-        failures = []
-        if not self._bound or self._stopped:
-            failures.append("the socket is not serving")
-        if not self._manager.registry.models:
-            failures.append("the registry parsed to no models")
-
-        models_dir = self._manager.models_dir
-        if not os.access(models_dir, os.W_OK | os.X_OK):
-            failures.append(f"the models directory {models_dir} is not writable")
-
-        last_error = self._manager.last_error
-        if last_error is not None and self._manager.resident() is None:
-            failures.append(f"nothing is resident and {last_error}")
-
-        verdict = self._verdict("readyz", failures)
-        verdict["resident"] = self._manager.resident()
-        verdict["loading"] = self._manager.loading
-        return verdict
-
-    def _verdict(self, probe: str, failures: list) -> Dict[str, Any]:
-        return {
-            "probe": probe,
-            "status": "pass" if not failures else "fail",
-            "uptime_s": round(time.monotonic() - self._started_at, 3),
-            "reasons": failures,
-        }
-
-SERVICE_NAME = "inferences-ocr"
 LISTEN_BACKLOG = 16
 # Live connections, not just queued ones. Each holds a thread and, mid-message, its
 # buffered chunks; the container has a hard memory limit.
@@ -113,12 +45,34 @@ KNOWN_OPS = ("handshake", "version", "list", "load", "unload", "infer", *PROBE_O
 
 
 def dispatch(
+    worker: Worker,
+    manager: ModelManager,
+    control: Dict[str, Any],
+    payload: bytes,
+    health: Optional[Health] = None,
+    metrics: Optional[Metrics] = None,
+) -> Dict[str, Any]:
+    """Turn one request into one response. The socket server is a thin wrapper over this."""
+    op = control.get("op")
+    response = _dispatch(worker, manager, control, payload, health)
+    if metrics is not None:
+        name = op if isinstance(op, str) else "unknown"
+        if response.get("ok"):
+            metrics.op(name, "ok")
+        else:
+            code = (response.get("error") or {}).get("code", "internal")
+            metrics.op(name, "error")
+            metrics.error(code)
+    return response
+
+
+def _dispatch(
+    worker: Worker,
     manager: ModelManager,
     control: Dict[str, Any],
     payload: bytes,
     health: Optional[Health] = None,
 ) -> Dict[str, Any]:
-    """Turn one request into one response. The socket server is a thin wrapper over this."""
     op = control.get("op")
 
     try:
@@ -128,11 +82,11 @@ def dispatch(
 
         if op in ("handshake", "version"):
             return ok(
-                service=SERVICE_NAME,
-                version=__version__,
+                service=worker.name,
+                version=worker.version,
                 protocol=dip.PROTOCOL_VERSION,
                 limits=dip.limits(),
-                engines=list(ENGINE_NAMES),
+                engines=list(worker.engines),
                 ops=list(KNOWN_OPS),
                 default_model=manager.registry.default_model,
                 resident=manager.resident(),
@@ -173,11 +127,14 @@ def dispatch(
 class SocketServer:
     def __init__(
         self,
+        worker: Worker,
         manager: ModelManager,
         socket_path: Path,
         idle_timeout: float = dip.IDLE_TIMEOUT,
         message_timeout: float = dip.MESSAGE_TIMEOUT,
+        metrics: Optional[Metrics] = None,
     ) -> None:
+        self._worker = worker
         self._manager = manager
         self._socket_path = socket_path
         self._idle_timeout = idle_timeout
@@ -185,6 +142,7 @@ class SocketServer:
         self._sock: socket.socket | None = None
         self._stopping = threading.Event()
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        self._metrics = metrics
         self.health = Health(manager)
 
     def serve_forever(self) -> None:
@@ -199,14 +157,20 @@ class SocketServer:
                     if self._stopping.is_set():
                         break
                     raise
-                if not self._slots.acquire(blocking=False):
+                accepted = self._slots.acquire(blocking=False)
+                if self._metrics is not None:
+                    self._metrics.connection(accepted=accepted)
+                if not accepted:
                     # Inline, not in a thread: we are already at capacity, so throttling
                     # the accept loop here is the point rather than a cost.
                     _refuse(connection)
                     continue
 
                 thread = threading.Thread(
-                    target=self._serve_connection, args=(connection,), daemon=True, name="ocr-conn"
+                    target=self._serve_connection,
+                    args=(connection,),
+                    daemon=True,
+                    name=f"{self._worker.name}-conn",
                 )
                 thread.start()
         finally:
@@ -252,7 +216,7 @@ class SocketServer:
                 dip.serve_connection(
                     connection,
                     lambda control, payload: dispatch(
-                        self._manager, control, payload, self.health
+                        self._worker, self._manager, control, payload, self.health, self._metrics
                     ),
                     self._idle_timeout,
                     self._message_timeout,

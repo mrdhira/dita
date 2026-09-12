@@ -5,6 +5,7 @@ requires-python = ">=3.14.6"
 [manifest]
 members = [
     "dip",
+    "dita-worker",
     "inferences-ocr",
 ]
 
@@ -223,6 +224,29 @@ dev = [
 dev = [{ name = "coverage", specifier = ">=7.6,<8" }]
 
 [[package]]
+name = "dita-worker"
+version = "0.1.0"
+source = { editable = "packages/pylibs/dita-worker" }
+dependencies = [
+    { name = "dip" },
+    { name = "pyyaml" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dip", editable = "packages/pylibs/dip" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.6,<8" }]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -244,7 +268,7 @@ name = "inferences-ocr"
 version = "0.1.0"
 source = { virtual = "services/inferences-ocr" }
 dependencies = [
-    { name = "dip" },
+    { name = "dita-worker" },
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "opencv-python" },
@@ -260,7 +284,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dip", editable = "packages/pylibs/dip" },
+    { name = "dita-worker", editable = "packages/pylibs/dita-worker" },
     { name = "numpy", specifier = ">=2.5,<3" },
     { name = "onnxruntime", specifier = ">=1.30,<2" },
     { name = "opencv-python", specifier = ">=5.0,<6" },

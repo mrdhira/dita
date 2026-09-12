@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from . import fetcher
-from .engines import Engine, Result, build_engine
+from .engines import Engine, EngineFactory, Result
+from .metrics import Metrics
 from .registry import ModelSpec, Registry
 
 LOG = logging.getLogger(__name__)
@@ -28,9 +29,18 @@ class NoModelLoaded(Exception):
 
 
 class ModelManager:
-    def __init__(self, registry: Registry, models_dir: Path) -> None:
+    def __init__(
+        self,
+        registry: Registry,
+        models_dir: Path,
+        build_engine: EngineFactory,
+        metrics: Optional[Metrics] = None,
+    ) -> None:
         self._registry = registry
         self._models_dir = models_dir
+        self._metrics = metrics
+        # The only thing the framework cannot know: which adapter an engine name means.
+        self._build_engine = build_engine
 
         # Guards the resident engine and every swap of it. Held only for fast work.
         self._lock = threading.Lock()
@@ -105,7 +115,7 @@ class ModelManager:
         with self._fetch_lock:
             self._loading = spec.id
             try:
-                fetcher.ensure_model(self._models_dir, spec)
+                fetcher.ensure_model(self._models_dir, spec, self._metrics)
             finally:
                 self._loading = None
 
@@ -120,12 +130,16 @@ class ModelManager:
 
             previous = self._resident[0].id if self._resident else None
             self._release()
-            engine = build_engine(spec.engine, fetcher.model_dir(self._models_dir, spec), spec.options)
+            engine = self._build_engine(
+                spec.engine, fetcher.model_dir(self._models_dir, spec), spec.options
+            )
             self._engine = engine
             self._resident = (spec, time.monotonic())
 
         self._last_error = None
         load_ms = round((time.monotonic() - started) * 1000, 1)
+        if self._metrics is not None:
+            self._metrics.loaded(spec.id, load_ms / 1000, previous)
         LOG.info("loaded %s in %sms (unloaded %s)", spec.id, load_ms, previous or "nothing")
         return {
             "id": spec.id,
@@ -144,9 +158,9 @@ class ModelManager:
             LOG.info("unloaded %s", previous)
         return {"unloaded": previous}
 
-    def infer(self, image_bytes: bytes) -> Dict[str, Any]:
-        if not image_bytes:
-            raise ValueError("infer needs image bytes in the message payload")
+    def infer(self, payload: bytes) -> Dict[str, Any]:
+        if not payload:
+            raise ValueError("infer needs the input in the message payload, which arrived empty")
 
         with self._lock:
             if self._engine is None or self._resident is None:
@@ -155,13 +169,17 @@ class ModelManager:
                 )
             model_id = self._resident[0].id
             started = time.monotonic()
-            result: Result = self._engine.infer(image_bytes)
+            result: Result = self._engine.infer(payload)
             infer_ms = round((time.monotonic() - started) * 1000, 1)
 
-        payload = result.as_dict()
-        payload["model"] = model_id
-        payload["infer_ms"] = infer_ms
-        return payload
+        # Outside the lock: a metrics update must never extend the critical section.
+        if self._metrics is not None:
+            self._metrics.inferred(model_id, infer_ms / 1000)
+
+        response = result.as_dict()
+        response["model"] = model_id
+        response["infer_ms"] = infer_ms
+        return response
 
     def _already_resident(self, spec: ModelSpec) -> Optional[Dict[str, Any]]:
         current = self._resident

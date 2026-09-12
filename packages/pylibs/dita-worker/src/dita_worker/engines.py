@@ -1,11 +1,16 @@
-"""What every OCR engine adapter has to look like."""
+"""What every engine adapter has to look like, and how the framework asks for one.
+
+The framework never names an engine. A service supplies `build_engine`, and the only thing
+declared here is the shape both sides agree on: a factory takes a name from models.yaml and
+returns something with `infer` and `close`.
+"""
 
 from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 Box = List[List[float]]  # four [x, y] corners, clockwise from top-left
 
@@ -41,8 +46,20 @@ class Engine(abc.ABC):
         self.options = options
 
     @abc.abstractmethod
-    def infer(self, image_bytes: bytes) -> Result:
-        """Run OCR over one encoded image (PNG/JPEG/... bytes)."""
+    def infer(self, payload: bytes) -> Result:
+        """Run the model over one encoded input (PNG/JPEG/WAV/... bytes)."""
 
     def close(self) -> None:
         """Release native resources. Safe to call more than once."""
+
+
+class UnknownEngine(Exception):
+    """models.yaml names an engine the service does not implement.
+
+    Raised by a service's factory, not here: the framework knows the name it was given and
+    nothing else. `dispatch` turns it into `unsupported_engine`.
+    """
+
+
+# engine name from models.yaml, the model's directory, its options -> a built engine.
+EngineFactory = Callable[[str, Path, Dict[str, Any]], Engine]

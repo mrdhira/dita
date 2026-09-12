@@ -22,9 +22,18 @@ Deployment lives in [`deployment/docker-compose.yml`](deployment/docker-compose.
 
 ```
 packages/
-  golibs/     Go modules, each its own go.mod, listed in go.work
-  pylibs/     Python packages, each a uv workspace member with a src/ layout
+  golibs/
+    dip/            the protocol: framing, both roles, generated types
+  pylibs/
+    dip/            the same protocol, the same generated types, in Python
+    dita-worker/    everything an inference worker does except the inference
 ```
+
+A worker service is now composition: `dita-worker` brings the socket server, the one-model
+manager, the registry reader, the digest-checking fetcher, the health probes, the CLI and
+the metrics, and the service brings an engine and a `models.yaml`. That claim is held up by
+a test in the package that builds a complete working worker from a fake engine and drives
+it over a real socket, importing nothing from any service.
 
 Each toolchain globs only its own subtree — `[tool.uv.workspace] members` covers
 `packages/pylibs/*`, `go.work` covers modules under `packages/golibs/` — so neither tool

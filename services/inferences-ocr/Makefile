@@ -6,7 +6,7 @@ UV        := uv run --package $(PACKAGE) --locked
 
 # A tripwire, not a target: a test that asserts nothing raises coverage just as well as a
 # test that asserts something. Set just below what the suite reaches.
-COVERAGE_FLOOR := 83
+COVERAGE_FLOOR := 87
 
 .PHONY: help test coverage run image
 

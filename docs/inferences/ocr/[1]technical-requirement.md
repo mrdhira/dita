@@ -137,7 +137,16 @@ In-memory state is one engine, one `(spec, loaded_at)` tuple assigned as a unit 
 reader cannot see a half-updated pair, a `loading` id, and a sticky `last_error` from the most
 recent failed load.
 
-**The dependency model** is the third piece of committed state, and it is repo-wide rather
+**This service is a composition.** The framework is
+[`packages/pylibs/dita-worker`](../../../packages/pylibs/dita-worker) — socket server, model
+manager, registry, fetcher, health and metrics — and the wire is
+[`packages/pylibs/dip`](../../../packages/pylibs/dip). What remains here is three engine
+adapters, `models.yaml` and a 36-line entrypoint. The seam is one dataclass and one
+callable: a `Worker` describing the service, and an engine factory mapping a name to an
+adapter. Nothing in the framework knows an OCR engine exists, which is what makes
+`inferences-stt` an engine plus a manifest rather than a fork.
+
+**The dependency model** is the fourth piece of committed state, and it is repo-wide rather
 than service-local. The root `pyproject.toml` is a **virtual uv workspace root** — no
 `[project]` table, only `[tool.uv.workspace]` with `members = ["services/inferences-*"]` — so
 every Python service resolves together into a single `uv.lock` at the repo root. Bounds are
@@ -359,9 +368,35 @@ What to watch first, in the absence of a metrics stack: `readyz` flipping false 
 is telling you it cannot work and why, in `reasons`), and repeated `busy` responses (the
 orchestrator is opening connections faster than it closes them).
 
-Deliberately not shipped: a Prometheus endpoint. That would be an HTTP listener, and the
-argument in Alternatives applies. When metrics are wanted, the orchestrator should export
-them from the values it already receives.
+**Metrics are served over HTTP on a separate port**, and that is not a reversal of the
+no-HTTP argument. That argument is about the *workload*: DIP carries megabytes on the hot
+path, where an HTTP parser and a framing library would be a dependency bought for nothing. A
+scrape is a few kilobytes of text on a timer, every collector already speaks HTTP, and
+`http.server` costs no dependency at all. Different traffic, different answer.
+
+The contract:
+
+- **Prometheus text format** at `/metrics`, port from `METRICS_ADDR`, default
+  `127.0.0.1:9109`. Loopback by default so nothing is exposed by accident; compose binds it
+  on the container network and publishes no port for it.
+- **Counters** for ops by op and outcome, errors by code, loads by model, evictions, bytes
+  and files fetched, connections accepted and refused. **Histograms** for `load_duration`
+  and `infer_duration`, by model — a percentile is the question anyone actually asks, and a
+  gauge of the last value cannot answer it. **Gauges** for residency, loading and process
+  RSS and CPU.
+- **A scrape never waits on the worker's lock.** Counters use their own lock, held for a
+  dict update; gauges read `ModelManager`'s lock-free view. An inference cannot delay a
+  scrape and a scrape cannot delay an inference. Tested by holding the manager's lock open
+  with a slow engine and asserting the scrape still returns.
+- **Every counter moves on the path it names.** None is a placeholder; each is asserted
+  around a real call. Verified live: after one load and one inference, `ops_total` showed
+  one of each op, `infer_duration_seconds_sum` was 13.3669 against a reported 13367 ms, and
+  a cold load moved `fetched_bytes_total` to 21510548 across 4 files, which is exactly what
+  `models.yaml` pins.
+
+The collector is scraped by an opt-in VictoriaMetrics stack behind a compose profile. The
+orchestrator will expose its own `/metrics` later and the same stack will scrape it with no
+other change.
 
 ## Security and privacy
 

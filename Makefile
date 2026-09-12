@@ -3,7 +3,7 @@
 # A unit is anything with its own tests and its own coverage number: a service, a shared
 # package, or an example. Examples are units too -- they are code someone will copy.
 
-PY_UNITS := services/inferences-ocr packages/pylibs/dip
+PY_UNITS := services/inferences-ocr packages/pylibs/dip packages/pylibs/dita-worker
 GO_UNITS := packages/golibs/dip services/inferences-ocr/examples/go
 UNITS    := $(PY_UNITS) $(GO_UNITS)
 
@@ -97,3 +97,8 @@ dip-verify:
 		echo "  stdlib only"
 	@echo "== packages/pylibs/dip: import scan"
 	@uv run --frozen python scripts/check_stdlib_only.py packages/pylibs/dip/src
+	@echo "== packages/pylibs/dita-worker: import scan"
+	@# yaml is the manifest reader's one dependency, declared in the package manifest and
+	@# named here so it stays a decision rather than a drift.
+	@uv run --frozen python scripts/check_stdlib_only.py \
+		packages/pylibs/dita-worker/src --allow yaml

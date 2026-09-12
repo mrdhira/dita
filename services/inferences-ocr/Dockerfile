@@ -12,16 +12,18 @@ WORKDIR /workspace
 # Manifests and lock only, so editing the worker does not rebuild dependencies.
 COPY pyproject.toml uv.lock ./
 COPY services/inferences-ocr/pyproject.toml services/inferences-ocr/pyproject.toml
-# A workspace member this service depends on: --locked reads every manifest in the lock.
+# Workspace members this service depends on: --locked reads every manifest in the lock.
 COPY packages/pylibs/dip/pyproject.toml packages/pylibs/dip/pyproject.toml
+COPY packages/pylibs/dita-worker/pyproject.toml packages/pylibs/dita-worker/pyproject.toml
 
 # --locked, not --frozen: only --locked verifies the lock against the manifests, so a
 # bound edited without `make lock` fails the build here.
 # --no-default-groups keeps dev-only packages out of the runtime image.
-# --no-emit-package dip: first-party source with no dependencies of its own, copied in
-# below like ocr_worker rather than pip-installed -- an editable entry carries no hash
-# and would fail --require-hashes.
-RUN uv export --package inferences-ocr --locked --no-emit-project --no-emit-package dip \
+# --no-emit-package dip/dita-worker: first-party source, copied in below like ocr_worker
+# rather than pip-installed -- an editable entry carries no hash and would fail
+# --require-hashes. Their own third-party dependencies stay in the export.
+RUN uv export --package inferences-ocr --locked --no-emit-project \
+        --no-emit-package dip --no-emit-package dita-worker \
         --no-default-groups --no-cache -o /tmp/requirements.txt
 
 FROM python:3.14.6-slim-trixie
@@ -54,6 +56,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock.txt \
 COPY services/inferences-ocr/models.yaml ./
 COPY services/inferences-ocr/ocr_worker ./ocr_worker
 COPY packages/pylibs/dip/src/dip ./dip
+COPY packages/pylibs/dita-worker/src/dita_worker ./dita_worker
 
 # Owned by `ocr` so the non-root user can write when run without bind mounts.
 RUN mkdir -p "$MODELS_DIR" "$(dirname "$SOCKET_PATH")" \

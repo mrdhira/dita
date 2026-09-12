@@ -86,16 +86,40 @@ check go golang "$GO_WANT" "$GO_HAVE" "$m"
 # The compiler on PATH is not what builds this repo; the directives are. A `go` line at the
 # full patch is the pin for a module -- a `toolchain` line equal to it makes the module
 # untidy and `go build` refuses it. go.work is the one file that takes both.
-GO_MODS=$(cd "$ROOT" && git ls-files '*/go.mod' 2>/dev/null)
-GO_DRIFT=$(cd "$ROOT" && [ -n "$GO_MODS" ] && grep -Lx "go $GO_WANT" $GO_MODS 2>/dev/null | tr '\n' ' ')
+#
+# Modules are found on disk, not through git: an untracked go.mod still gets built, and
+# outside a checkout `git ls-files` returns nothing, which used to read as "no go modules
+# yet" on a tree with three of them.
+GO_MODS=$(find "$ROOT" -name go.mod -not -path '*/.venv/*' -not -path '*/node_modules/*' \
+    -not -path '*/.git/*' 2>/dev/null | sort)
+GO_WORK="$ROOT/go.work"
+
 if [ -z "$GO_MODS" ]; then
-    pass toolchain "no go modules yet"
-elif [ -n "$GO_DRIFT" ]; then
-    fail toolchain "go.mod not pinned to $GO_WANT: $GO_DRIFT" "set 'go $GO_WANT' in each"
-elif ! grep -qx "toolchain go$GO_WANT" "$ROOT/go.work" 2>/dev/null; then
-    fail toolchain "go.work has no 'toolchain go$GO_WANT'" "add it to go.work"
+    pass toolchain "no go modules on disk"
 else
-    pass toolchain "go $GO_WANT in every go.mod, toolchain go$GO_WANT in go.work"
+    drift=""
+    redundant=""
+    for mod in $GO_MODS; do
+        grep -qx "go $GO_WANT" "$mod" || drift="$drift ${mod#"$ROOT/"}"
+        # The failure the comment above exists to prevent: a toolchain line equal to the
+        # go line. `go build` refuses it and `go mod tidy` deletes it.
+        grep -qx "toolchain go$GO_WANT" "$mod" && redundant="$redundant ${mod#"$ROOT/"}"
+    done
+
+    if [ -n "$drift" ]; then
+        fail toolchain "go.mod not pinned to $GO_WANT:$drift" "set 'go $GO_WANT' in each"
+    elif [ -n "$redundant" ]; then
+        fail toolchain "redundant 'toolchain go$GO_WANT' in:$redundant" \
+            "remove it; go build refuses a toolchain line equal to the go line"
+    elif [ ! -f "$GO_WORK" ]; then
+        fail toolchain "no go.work beside $(basename "$ROOT")" "create it with 'go work init'"
+    elif ! grep -qx "go $GO_WANT" "$GO_WORK"; then
+        fail toolchain "go.work has no 'go $GO_WANT'" "set it in go.work"
+    elif ! grep -qx "toolchain go$GO_WANT" "$GO_WORK"; then
+        fail toolchain "go.work has no 'toolchain go$GO_WANT'" "add it to go.work"
+    else
+        pass toolchain "$(printf '%s\n' "$GO_MODS" | wc -l | tr -d ' ') go.mod pinned to $GO_WANT, go.work carries both"
+    fi
 fi
 
 GIT_HAVE=$(command -v git >/dev/null 2>&1 && git --version 2>/dev/null | awk '{print $3}')

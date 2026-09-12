@@ -93,10 +93,10 @@
     },
     {
       "name": "non-ascii control block",
-      "why": "UTF-8 must survive the length arithmetic, which counts bytes not characters",
+      "why": "57 bytes for 37 characters: the length arithmetic counts bytes, and this is where that is proved",
       "datagrams": [
-        "eyJwcm90b2NvbCI6IDIsICJjb250cm9sX2xlbiI6IDg3LCAicGF5bG9hZF9sZW4iOiAwfQ==",
-        "eyJvcCI6ICJpbmZlciIsICJub3RlIjogIlx1NjVlNVx1NjcyY1x1OGE5ZVx1MzA2ZVx1MzBjNlx1MzBhZFx1MzBiOVx1MzBjOFx1OGE4ZFx1OGI1OCJ9"
+        "eyJwcm90b2NvbCI6IDIsICJjb250cm9sX2xlbiI6IDU3LCAicGF5bG9hZF9sZW4iOiAwfQ==",
+        "eyJvcCI6ICJpbmZlciIsICJub3RlIjogIuaXpeacrOiqnuOBruODhuOCreOCueODiOiqjeitmCJ9"
       ],
       "expect": {
         "outcome": "accept",
@@ -122,6 +122,30 @@
         },
         "payload_len": 0,
         "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "prologue announcing a future protocol version",
+      "why": "the one failure the version field exists to catch: refuse, do not serve it",
+      "datagrams": [
+        "eyJwcm90b2NvbCI6IDk5LCAiY29udHJvbF9sZW4iOiAxMywgInBheWxvYWRfbGVuIjogMH0=",
+        "eyJvcCI6Imxpc3QifQ=="
+      ],
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request"
+      }
+    },
+    {
+      "name": "prologue missing payload_len",
+      "why": "the IDL marks it required; a default of zero hides a peer that forgot the payload",
+      "datagrams": [
+        "eyJwcm90b2NvbCI6IDIsICJjb250cm9sX2xlbiI6IDEzfQ==",
+        "eyJvcCI6Imxpc3QifQ=="
+      ],
+      "expect": {
+        "outcome": "reject",
+        "error": "bad_request"
       }
     },
     {

@@ -39,7 +39,9 @@ def chunks(raw: bytes) -> list[bytes]:
 
 
 def message(control: dict, payload: bytes = b"") -> list[bytes]:
-    body = json.dumps(control).encode("utf-8")
+    # ensure_ascii=False on purpose: with the default, a "non-ascii" case ships pure ASCII
+    # escapes and a decoder that confuses bytes with characters still passes it.
+    body = json.dumps(control, ensure_ascii=False).encode("utf-8")
     return [prologue(len(body), len(payload)), *chunks(body), *chunks(payload)]
 
 
@@ -122,13 +124,20 @@ def build() -> dict:
             **payload_expect(b""),
         )
     )
+    non_ascii = {"op": "infer", "note": "日本語のテキスト認識"}
+    encoded = json.dumps(non_ascii, ensure_ascii=False).encode("utf-8")
+    assert len(encoded) > len(json.dumps(non_ascii, ensure_ascii=False)), (
+        "this case exists to make bytes and characters differ; they do not"
+    )
+    assert any(byte > 0x7F for byte in encoded), "no non-ascii bytes in the non-ascii case"
     cases.append(
         case(
             "non-ascii control block",
-            "UTF-8 must survive the length arithmetic, which counts bytes not characters",
-            message({"op": "infer", "note": "日本語のテキスト認識"}),
+            f"{len(encoded)} bytes for {len(json.dumps(non_ascii, ensure_ascii=False))} characters: "
+            "the length arithmetic counts bytes, and this is where that is proved",
+            message(non_ascii),
             outcome="accept",
-            control={"op": "infer", "note": "日本語のテキスト認識"},
+            control=non_ascii,
             **payload_expect(b""),
         )
     )
@@ -144,6 +153,24 @@ def build() -> dict:
     )
 
     # --- rejected -------------------------------------------------------------------
+    cases.append(
+        case(
+            "prologue announcing a future protocol version",
+            "the one failure the version field exists to catch: refuse, do not serve it",
+            [prologue(13, 0, protocol=99), b'{"op":"list"}'],
+            outcome="reject",
+            error="bad_request",
+        )
+    )
+    cases.append(
+        case(
+            "prologue missing payload_len",
+            "the IDL marks it required; a default of zero hides a peer that forgot the payload",
+            [b'{"protocol": 2, "control_len": 13}', b'{"op":"list"}'],
+            outcome="reject",
+            error="bad_request",
+        )
+    )
     cases.append(
         case(
             "prologue is not utf-8 json",
@@ -302,6 +329,21 @@ def build() -> dict:
     }
 
 
+def check_handwritten() -> None:
+    """The other two files are written by hand; this is the only thing that reads them
+    outside the suites, so it is where a malformed one should be caught."""
+    here = OUT.parent
+    for name, required in (("dispatch.json", ("op_fields", "cases")), ("responses.json", ("cases",))):
+        body = json.loads((here / name).read_text(encoding="utf-8"))
+        for key in required:
+            if key not in body:
+                raise SystemExit(f"{name}: missing {key!r}")
+        for entry in body["cases"]:
+            if "name" not in entry:
+                raise SystemExit(f"{name}: a case has no name")
+        print(f"{name}: {len(body['cases'])} cases, well-formed")
+
+
 if __name__ == "__main__":
     OUT.write_text(json.dumps(build(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     corpus = json.loads(OUT.read_text(encoding="utf-8"))
@@ -309,3 +351,4 @@ if __name__ == "__main__":
     for entry in corpus["cases"]:
         counts[entry["expect"]["outcome"]] = counts.get(entry["expect"]["outcome"], 0) + 1
     print(f"{OUT.name}: {len(corpus['cases'])} cases {counts}")
+    check_handwritten()

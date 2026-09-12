@@ -35,7 +35,9 @@ help:
 doctor:
 	@./scripts/doctor.sh
 
-test:
+# dip-verify runs first: the zero-dependency bar is an acceptance criterion, and a
+# target nothing invokes is a target nobody honours.
+test: dip-verify
 	@for unit in $(UNITS); do \
 		echo "== $$unit"; \
 		$(MAKE) --no-print-directory -C $$unit test || exit $$?; \
@@ -84,17 +86,24 @@ dip-corpus:
 # `.Standard` is go's own verdict, so std's vendored packages (vendor/golang.org/x/net,
 # which arrives with `import "net"`) count as stdlib. Matching on a dotted path instead
 # would flag them, and flag the module's own packages, which `go list -deps` always lists.
-GO_THIRD_PARTY = go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./... 	| grep -v '^github.com/mrdhira/dita/' || true
+# `|| true` cannot be used here: grep -v exits 1 when it filters everything out, but it
+# would also swallow go list's own failure and report "stdlib only" for a check that never
+# ran. go list's status is captured on its own line, before grep sees the output.
+define go_third_party
+	deps=$$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./... 2>&1) || { \
+		echo "  CANNOT VERIFY: go list failed"; printf '%s\n' "$$deps" | sed 's/^/    /'; \
+		exit 1; \
+	}; \
+	out=$$(printf '%s\n' "$$deps" | grep -v '^github.com/mrdhira/dita/' | grep -v '^$$' || true); \
+	if [ -n "$$out" ]; then printf '%s\n' "$$out" | sed 's/^/  THIRD-PARTY: /'; exit 1; fi; \
+	echo "  stdlib only"
+endef
 
 dip-verify:
 	@echo "== packages/golibs/dip: go list -deps"
-	@cd packages/golibs/dip && out=$$($(GO_THIRD_PARTY)); \
-		if [ -n "$$out" ]; then echo "$$out" | sed 's/^/  THIRD-PARTY: /'; exit 1; fi; \
-		echo "  stdlib only"
+	@cd packages/golibs/dip && $(go_third_party)
 	@echo "== services/inferences-ocr/examples/go: go list -deps"
-	@cd services/inferences-ocr/examples/go && out=$$($(GO_THIRD_PARTY)); \
-		if [ -n "$$out" ]; then echo "$$out" | sed 's/^/  THIRD-PARTY: /'; exit 1; fi; \
-		echo "  stdlib only"
+	@cd services/inferences-ocr/examples/go && $(go_third_party)
 	@echo "== packages/pylibs/dip: import scan"
 	@uv run --frozen python scripts/check_stdlib_only.py packages/pylibs/dip/src
 	@echo "== packages/pylibs/dita-worker: import scan"

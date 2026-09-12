@@ -1,0 +1,28 @@
+# Opt-in metrics stack. Not part of `docker compose up`: this box has 16 GB and the dev
+# stack should not grow by default.
+#
+#   docker compose -f docker-compose.yml -f compose.observability.yml --profile observability up -d
+#
+# vmui is at http://localhost:8428/vmui -- query, explore and graph, so no Grafana.
+
+services:
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.151.0
+    container_name: victoria-metrics
+    profiles: ["observability"]
+    command:
+      - "-promscrape.config=/etc/vm/scrape.yml"
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=15d"
+      - "-httpListenAddr=:8428"
+    ports:
+      # vmui and the query API. Bound to loopback: this is a dev tool, not a service.
+      - "127.0.0.1:8428:8428"
+    volumes:
+      - ./observability/scrape.yml:/etc/vm/scrape.yml:ro
+      - victoria-metrics-data:/victoria-metrics-data
+    mem_limit: 1g
+    restart: unless-stopped
+
+volumes:
+  victoria-metrics-data:

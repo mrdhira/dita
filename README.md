@@ -82,11 +82,36 @@ workspace, so `doctor` asks uv what this repo would run rather than reading what
 `python3` happens to be first on your PATH. If it is missing, `uv python install 3.14`.
 
 ```bash
-make test        # every service's tests
-make coverage    # every service's coverage, reported per service
+make test        # every unit's tests, both languages
+make coverage    # every unit's coverage, reported per unit
 make build       # every service image
 docker compose -f deployment/docker-compose.yml up --build
 ```
+
+## Metrics
+
+Each worker serves Prometheus text on its own small HTTP port, separate from the workload
+protocol: DIP is the hot path and stays a unix socket, while a scrape is a different
+concern with different traffic. The port defaults to loopback and is never published to the
+host; compose binds it on the internal network so a scraper can reach it.
+
+The metrics stack is **opt-in**, because the default `up` should stay small:
+
+```bash
+docker compose -f deployment/docker-compose.yml \
+               -f deployment/compose.observability.yml \
+               --profile observability up -d
+```
+
+That runs [VictoriaMetrics](https://docs.victoriametrics.com/), which is the pick because
+**vmui replaces Grafana** — query, explore and graph at
+[localhost:8428/vmui](http://localhost:8428/vmui) with nothing else to run or configure.
+Without the profile flag nothing observability-related starts.
+
+Scrape targets live in
+[`deployment/observability/scrape.yml`](deployment/observability/scrape.yml). The Go
+orchestrator will expose its own `/metrics` later; its target is already written there,
+commented out, and the stack will scrape it with no other change.
 
 ## The Go ↔ Python contract, in brief
 

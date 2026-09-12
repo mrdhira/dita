@@ -1,0 +1,21 @@
+# VictoriaMetrics scrape config. Targets are compose service names on the default network;
+# none of these ports are published to the host.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: inferences-ocr
+    static_configs:
+      - targets: ["inferences-ocr:9109"]
+        labels:
+          service: inferences-ocr
+          kind: worker
+
+  # The Go orchestrator will expose /metrics on this port later. Uncomment then; the
+  # stack needs no other change.
+  # - job_name: dita-orchestrator
+  #   static_configs:
+  #     - targets: ["dita-orchestrator-rest:9109"]
+  #       labels:
+  #         service: dita-orchestrator
+  #         kind: control-plane

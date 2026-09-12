@@ -31,6 +31,9 @@ services:
       - SOCKET_PATH=/run/dita/inferences-ocr.sock
       - MODELS_DIR=/models
       - OCR_LOG_LEVEL=info
+      # Reachable on the compose network only: no ports entry publishes it. The worker's
+      # own default is loopback, so it is never exposed by accident elsewhere.
+      - METRICS_ADDR=0.0.0.0:9109
     # Bind mounts, not named volumes: both directories live in the repo, so they can be
     # inspected with ls and reset with rm -rf. Their contents are gitignored; a .gitkeep
     # keeps the directory itself in git.

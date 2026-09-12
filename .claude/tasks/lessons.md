@@ -113,3 +113,32 @@ HTTP parser and a framing library would be a dependency bought for nothing. Metr
 kilobytes on a timer and every collector already speaks HTTP, so serving them over
 `http.server` costs no dependency and saves inventing a scrape protocol. Same repo,
 opposite answers, because the question was different.
+
+### A connection that failed mid-exchange is not reusable
+
+Retire it on any failed exchange and make reuse an explicit error.
+
+**Why:** the Go requester wrote and read under one deadline and marked nothing broken on
+failure, so a timed-out call left the receiver's response queued and the next call read it.
+Against a live worker, image B came back with image A's text and no error at all. Wrong
+answers are worse than errors, and the orchestrator being written to copy that client is
+exactly the caller that retries.
+
+### A test that shares a connection between cases can hide the bug it is near
+
+Give each case its own.
+
+**Why:** the test that almost caught the above ran two subtests on one requester and
+cancelled before the stale response landed, so it never looked. The reviewer's phrase was
+"one line from demonstrating this".
+
+### A gate that cannot run must fail, not pass
+
+Capture the status of the command that produces the evidence, separately from the filter
+that reads it.
+
+**Why:** `dip-verify` ended in `|| true` because `grep -v` exits 1 when it filters
+everything out. With `go` off PATH the output was empty, the filter found nothing, and it
+printed "stdlib only" and exited 0 for a check that never ran. The same shape made
+`doctor` report "no go modules yet" on a tree with three, because it read the module list
+from `git ls-files`.

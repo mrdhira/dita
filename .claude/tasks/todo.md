@@ -32,6 +32,14 @@ implementations that agree today.
       uses it.
 - [x] B6. Per-unit Makefiles and coverage for packages and examples, both languages.
 
+## Order D — the independent review's findings
+
+- [x] D1. The 12 must-fix items, each verified before fixing and mutated after.
+- [x] D2. The smaller findings, each verified; two were already false on disk.
+- [x] D3. Docs stop contradicting the code; the IDL and the spec agree on extensibility.
+- [x] D4. The two decisions reported back rather than made:
+      [`docs/protocol/[2]open-questions.md`](../../docs/protocol/%5B2%5Dopen-questions.md).
+
 ## Order C — worker kit refactor + metrics
 
 - [x] C1. Extract the reusable worker parts into `packages/pylibs/`.

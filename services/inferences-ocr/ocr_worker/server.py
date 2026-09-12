@@ -111,6 +111,15 @@ REFUSAL_DRAIN_SECONDS = 0.5
 PROBE_OPS = {"livez": "live", "readyz": "ready", "startupz": "startup"}
 KNOWN_OPS = ("handshake", "version", "list", "load", "unload", "infer", *PROBE_OPS)
 
+# Fields each op accepts besides `op`. Anything else is refused rather than ignored: a
+# caller who sends `model` to `infer` has the wrong model in mind, and silently running
+# the resident one would answer the wrong question.
+OP_FIELDS = {"load": frozenset({"id", "model"})}
+INFER_MODEL_HINT = (
+    "infer takes no `model` field: `load` the model first and `unload` when done, "
+    "so which model answered is never in doubt"
+)
+
 
 def dispatch(
     manager: ModelManager,
@@ -122,6 +131,12 @@ def dispatch(
     op = control.get("op")
 
     try:
+        unexpected = sorted(set(control) - {"op"} - OP_FIELDS.get(op, frozenset()))
+        if unexpected and op in KNOWN_OPS:
+            if op == "infer" and "model" in unexpected:
+                return error("bad_request", INFER_MODEL_HINT)
+            return error("bad_request", f"{op} takes no {', '.join(repr(f) for f in unexpected)} field")
+
         if op in ("handshake", "version"):
             return ok(
                 service=SERVICE_NAME,

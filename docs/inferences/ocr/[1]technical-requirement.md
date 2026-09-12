@@ -188,7 +188,7 @@ datagram is empty, an empty read means the peer closed.
 | `list` | — | `models[]`, `default_model`, `resident`, `loading` |
 | `load` | `id` | `id`, `engine`, `already_resident`, `load_ms`, `unloaded` |
 | `unload` | — | `unloaded` |
-| `infer` | payload = encoded image bytes | `text`, `lines[]`, `model`, `infer_ms` |
+| `infer` | payload = encoded image bytes, no fields | `text`, `lines[]`, `model`, `infer_ms` |
 | `livez` / `readyz` / `startupz` | — | `probe`, `status`, `uptime_s`, `reasons[]` (+ `resident`, `loading` on `readyz`) |
 
 Every response carries `ok`. A failure is `{"ok": false, "error": {"code", "message"}}`;
@@ -199,6 +199,10 @@ Every response carries `ok`. A failure is `{"ok": false, "error": {"code", "mess
 **Limits**, advertised in the handshake so nothing is hard-coded: `max_chunk` 65536,
 `max_control` 8 MiB, `max_payload` 64 MiB, `idle_timeout_s` 300, `message_timeout_s` 30, and
 a cap of 16 concurrent connections.
+
+**Unknown fields are refused, not ignored.** Each op declares the fields it accepts
+(`load` takes `id`, with `model` as an alias; everything else takes none) and anything else
+is a `bad_request`. `infer` with a `model` field gets a message pointing at `load`.
 
 **Idempotency and retries.** `load` is idempotent — loading what is already resident returns
 `already_resident: true` and builds nothing. `unload` on an empty worker returns
@@ -478,19 +482,49 @@ keeping special tokens, reading the first timestep instead of the last, dropping
 dropping the BGR conversion, joining lines with a space, and mis-mapping an engine name. All
 twelve were caught, each by the specific row that should have caught it.
 
+## Decisions
+
+The open questions from the first draft, resolved by Dhira. Each says what was decided and
+what it leaves to do.
+
+**`infer` takes no `model` field. Settled.** The orchestrator must `load` first and `unload`
+after, so which model answered a request is never in doubt. `infer` validates: with nothing
+resident it returns `no_model_loaded` rather than guessing, and a control block carrying a
+`model` field is now **refused** rather than silently ignored — sending one means the caller
+has a different model in mind than the resident one, and running the resident one anyway
+would answer the wrong question. The same check refuses any field an op does not take.
+
+**No `cancel` op. Settled, with work attached.** Cancelling wastes the bandwidth already
+spent. Two things follow, and neither exists yet:
+
+- **Work must survive a client disconnect.** A dropped connection today loses the response;
+  the inference itself continues to completion and the result is discarded. That is the
+  right half. The missing half is that the result should remain retrievable.
+- **A client must be able to reconnect and ask for current progress**, so a progress bar is
+  possible. That needs a job identity, a progress field the engine updates as it works, and
+  an op to query it. This is the next protocol change to design.
+
+Until then a Go-side timeout abandons the *response*, not the work: the worker keeps going,
+and the orchestrator must not assume a timeout freed the lock.
+
+**manga-ocr's decode cost is not accepted.** The exported decoder has no key/value cache, so
+each step re-runs it over the whole prefix — quadratic in output length, and an allocation
+per step. **Open technical task:** re-export the decoder with past key/values (or an
+equivalent reuse), and measure it. If that proves impossible, the orchestrator's queue has to
+budget for the real cost rather than the nominal one. Not settled either way; it needs the
+export attempt first.
+
+**Shared code across `-stt` and `-tts` goes to `packages/`.** The convention, verified
+against uv: a service depends on a workspace member by name and declares
+`[tool.uv.sources] <name> = { workspace = true }`. It resolves into the same root `uv.lock`
+as `source = { editable = "packages/<name>" }` — no version pinning, and edits are live
+because it is installed editable. Services themselves stay `package = false` and appear as
+`virtual`; only real shared packages are installable. **The extraction is a follow-up**: the
+protocol, the registry and the fetcher are the obvious candidates, but nothing moves until a
+second worker exists to share them with, because one caller is not yet a pattern.
+
 ## Open questions
 
-- [ ] **Q:** Should `infer` accept a `model` field that loads on demand when nothing is
-  resident, or does that belong entirely to the orchestrator? — *owner:* Dhira — *needed by:*
-  the orchestrator client change.
-- [ ] **Q:** Does a `cancel` op earn its keep? A `load` in flight cannot currently be aborted;
-  a Go-side timeout abandons the response, not the download. — *owner:* Dhira — *needed by:*
-  whenever a user-facing timeout first sits behind a cold load.
-- [ ] **Q:** manga-ocr re-runs its decoder over the whole prefix each step because the
-  exported graph has no key/value cache. Re-export with one, or accept the cost? — *owner:*
-  Dhira — *needed by:* only if manga-ocr becomes a hot path.
-- [ ] **Q:** Where do metrics go, given there is deliberately no HTTP endpoint here? Likely
-  the orchestrator, from `load_ms`/`infer_ms`. — *owner:* Dhira — *needed by:* the first
-  dashboard.
-- [ ] **Q:** Do `-stt` and `-tts` reuse this protocol verbatim, or does the shared part move
-  into `packages/`? — *owner:* Dhira — *needed by:* the second worker.
+- [ ] **Q:** Where do metrics go, given there is deliberately no HTTP endpoint here? Dhira
+  has asked for a recommendation; none is offered yet, so this stays open. — *owner:* Dhira
+  — *needed by:* the first dashboard.

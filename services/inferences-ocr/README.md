@@ -153,7 +153,7 @@ is exactly one chunk, and a larger datagram is caught by `MSG_TRUNC` rather than
 | `list` | — | `models[]`, `default_model`, `resident`, `loading` |
 | `load` | `id` | `id`, `engine`, `already_resident`, `load_ms`, `unloaded` (always present) |
 | `unload` | — | `unloaded` |
-| `infer` | payload = encoded image bytes | `text`, `lines[]`, `model`, `infer_ms` |
+| `infer` | payload = encoded image bytes, no fields | `text`, `lines[]`, `model`, `infer_ms` |
 | `livez` | — | `probe`, `status`, `uptime_s`, `reasons[]` |
 | `readyz` | — | the same, plus `resident` and `loading` |
 | `startupz` | — | `probe`, `status`, `uptime_s`, `reasons[]` |
@@ -181,7 +181,10 @@ engines that do not localise text. `confidence` is 0..1, or `null`.
 
 `infer` with nothing resident returns `no_model_loaded`. It does not quietly load the
 default: choosing what is resident is the orchestrator's job, and a load can mean a
-multi-hundred-megabyte download.
+multi-hundred-megabyte download. It also takes **no `model` field** — send one and it is
+refused, because a caller naming a model wants that model, and running the resident one
+instead would answer a different question. `load` first, `unload` after. Any field an op
+does not take is refused the same way rather than ignored.
 
 ### Health probes
 

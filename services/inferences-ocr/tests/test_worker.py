@@ -677,6 +677,12 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(response["limits"]["max_chunk"], protocol.MAX_CHUNK)
         self.assertIsNone(response["resident"])
 
+    def test_load_accepts_model_as_an_alias_for_id(self) -> None:
+        """`model` is meaningful on load and meaningless on infer; only load takes it."""
+        response = dispatch(self.manager, {"op": "load", "model": "tesseract"}, b"")
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["id"], "tesseract")
+
     def test_list_then_load_then_unload(self) -> None:
         listing = dispatch(self.manager, {"op": "list"}, b"")
         self.assertTrue(listing["ok"])
@@ -704,6 +710,12 @@ class DispatchTest(unittest.TestCase):
          "no_model_loaded", "load"),
         ("load of a model the registry does not have", {"op": "load", "id": "nope"},
          b"", "unknown_model", "nope"),
+        # A field the op does not take is refused, never ignored: a caller who sends
+        # `model` to infer has a different model in mind than the resident one.
+        ("infer carrying a model field", {"op": "infer", "model": "manga-ocr"}, b"png",
+         "bad_request", "`load` the model first"),
+        ("an op with a field it does not take", {"op": "list", "verbose": True}, b"",
+         "bad_request", "'verbose'"),
     ]
 
     def test_malformed_requests_get_a_coded_error(self) -> None:

@@ -10,16 +10,12 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     volumes:
       # The orchestrator dials the inference workers over this shared socket directory.
-      - dita-sockets:/run/dita
-    # Start order matters for the shared volume. A named volume takes its ownership from
-    # the first image directory that covers it; the orchestrator is FROM scratch and has
-    # no /run/dita, so it would seed a root-owned directory that the worker's non-root
-    # user cannot bind into. Starting the worker first makes the ownership deterministic
-    # rather than a race. The orchestrator runs as root, so it can open the socket either
-    # way.
+      - ../run:/run/dita
+    # Start order matters for the shared directory: the worker creates the socket in it,
+    # and it runs as a non-root user. Starting it first keeps ownership deterministic.
     depends_on:
       inferences-ocr:
-        condition: service_started
+        condition: service_healthy
     command: ["serveRest"]
     restart: unless-stopped
 
@@ -32,17 +28,29 @@ services:
       - SOCKET_PATH=/run/dita/inferences-ocr.sock
       - MODELS_DIR=/models
       - OCR_LOG_LEVEL=info
+    # Bind mounts, not named volumes: both directories live in the repo, so they can be
+    # inspected with ls and reset with rm -rf. Their contents are gitignored; a .gitkeep
+    # keeps the directory itself in git.
     volumes:
-      - dita-sockets:/run/dita
+      - ../run:/run/dita
       # Weights are fetched on first load and cached here. Never baked into the image,
-      # never committed.
-      - ocr-models:/models
+      # never committed. `rm -rf services/inferences-ocr/models/*` is a full reset.
+      - ../services/inferences-ocr/models:/models
     # One model resident at a time; PP-OCRv5 needs a few hundred MB, manga-ocr ~800MB.
     # Raise mem_limit before selecting manga-ocr as the steady-state model.
     mem_limit: 2g
     cpus: 1.0
+    # The image's non-root user is uid 10001. Run as the invoking user instead so the
+    # bind-mounted repo directories stay writable and the files it fetches stay yours.
+    user: "${UID:-1000}:${GID:-1000}"
+    # An exec probe, not an HTTP one: this service has no HTTP surface and is not getting
+    # a TCP listener just for health. `readyz` stays true through a cold model load -- a
+    # load in flight is progress, not a wedge -- so the long start_period only has to
+    # cover process start and the socket bind.
+    healthcheck:
+      test: ["CMD", "python", "-m", "ocr_worker", "--probe", "ready"]
+      start_period: 30s
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
-
-volumes:
-  dita-sockets:
-  ocr-models:

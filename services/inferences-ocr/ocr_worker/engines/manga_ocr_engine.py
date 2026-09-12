@@ -1,12 +1,42 @@
 """manga-ocr as two ONNX graphs plus a greedy decode loop.
 
-Upstream manga-ocr is a torch VisionEncoderDecoder. This adapter runs the exported
-encoder/decoder under ONNXRuntime so the image stays torch-free. The tokenizer is a
-character-level BERT vocabulary, so decoding is a plain id -> line lookup; no mecab and
-no tokenizer library are needed to read text back out.
+Where this engine sits in the pipeline, and why it looks nothing like `rapidocr_engine`.
+That asymmetry is a boundary difference, not an oversight. RapidOCR ships a library that
+owns the whole pipeline; manga-ocr ships **only** an exported encoder graph, an exported
+decoder graph and a vocabulary file. Upstream's pipeline lives in a torch
+`VisionEncoderDecoder`, which this service will not take as a dependency, so everything
+between the image bytes and the string is ours:
+
+1. **Preprocess** (`_preprocess`). Upstream greyscales first and then feeds three identical
+   channels, so we do the same -- the model was trained on that, and skipping it changes
+   the input distribution. Then bilinear resize to 224x224, scale by 1/255, and normalise
+   with mean and std 0.5, all read from the pinned `preprocessor_config.json` rather than
+   hardcoded. Out comes NCHW float32.
+
+2. **Encode.** One forward pass of the encoder graph, giving 197 patch embeddings.
+
+3. **Greedy decode** (`infer`). The exported decoder has no key/value cache: its inputs are
+   the whole token sequence so far plus the encoder output. So we start from
+   `decoder_start_token_id`, run the decoder, take the last timestep's logits, `argmax` for
+   the next token, append, and repeat until `eos_token_id` or `max_tokens`. Greedy, not the
+   beam search in `generation_config.json` -- one model, one CPU, and beam search would
+   multiply an already quadratic loop by the beam width.
+
+   The softmax in `_softmax_max` is **only** for the confidence number. `argmax` picks the
+   token directly from the logits and needs no normalisation; softmax turns that winning
+   logit into a probability so the per-token values are comparable, and the mean of them
+   becomes the line confidence. Skipping it would leave a raw logit, which is not on any
+   scale a caller can reason about.
+
+4. **Postprocess** (`_post_process`). Map ids back through the vocabulary. The tokenizer is
+   character-level, so decoding is a lookup and a join -- no mecab, no tokenizer library,
+   which is what keeps this dependency-free. Then upstream's tidy-up: drop whitespace, fold
+   ellipses. Upstream also runs jaconv half-width to full-width conversion; we do not, and
+   the README says so.
 
 The model reads one text block and returns one string, so give it a crop of a speech
-bubble rather than a whole page.
+bubble rather than a whole page. There is no detector here at all -- that is the other
+half of what RapidOCR gives us for free.
 """
 
 from __future__ import annotations

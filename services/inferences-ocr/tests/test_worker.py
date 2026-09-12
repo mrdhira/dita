@@ -23,7 +23,7 @@ from ocr_worker.engines import Engine, Line, Result
 from ocr_worker.fetcher import ChecksumError, FetchError, ensure_model
 from ocr_worker.manager import ModelManager, NoModelLoaded
 from ocr_worker.registry import ModelFile, ModelSpec, RegistryError, load_registry
-from ocr_worker.server import MAX_CONNECTIONS, SocketServer, dispatch
+from ocr_worker.server import MAX_CONNECTIONS, Health, SocketServer, dispatch
 
 REGISTRY_PATH = Path(__file__).resolve().parent.parent / "models.yaml"
 GOOD_BYTES = b"pretend these are model weights"
@@ -535,6 +535,117 @@ class DispatchTest(unittest.TestCase):
         self.assertIn("teleport", response["error"]["message"])
 
 
+class HealthTest(unittest.TestCase):
+    """livez / readyz / startupz, and what each one is allowed to be false for."""
+
+    def setUp(self) -> None:
+        FakeEngine.built.clear()
+        import ocr_worker.manager as manager_module
+
+        self._module = manager_module
+        self._real_ensure = manager_module.fetcher.ensure_model
+        self._real_build = manager_module.build_engine
+        manager_module.fetcher.ensure_model = lambda models_dir, spec: []
+        manager_module.build_engine = lambda engine, model_dir, options: FakeEngine(engine)
+
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.manager = ModelManager(load_registry(REGISTRY_PATH), Path(self.directory.name))
+        self.health = Health(self.manager)
+
+    def tearDown(self) -> None:
+        self._module.fetcher.ensure_model = self._real_ensure
+        self._module.build_engine = self._real_build
+
+    def test_a_freshly_bound_worker_passes_all_three(self) -> None:
+        self.health.mark_bound()
+        for op in ("livez", "readyz", "startupz"):
+            response = dispatch(self.manager, {"op": op}, b"", self.health)
+            self.assertTrue(response["ok"], f"{op}: {response.get('reasons')}")
+            self.assertEqual(response["probe"], op)
+            self.assertEqual(response["status"], "pass")
+
+    def test_startupz_fails_until_the_socket_is_bound(self) -> None:
+        before = dispatch(self.manager, {"op": "startupz"}, b"", self.health)
+        self.assertFalse(before["ok"])
+        self.assertIn("not bound", " ".join(before["reasons"]))
+
+        self.health.mark_bound()
+        self.assertTrue(dispatch(self.manager, {"op": "startupz"}, b"", self.health)["ok"])
+
+    def test_livez_ignores_dependencies_and_only_fails_on_shutdown(self) -> None:
+        self.health.mark_bound()
+        self.manager._last_error = "load of anything failed: boom"
+        self.assertTrue(dispatch(self.manager, {"op": "livez"}, b"", self.health)["ok"])
+
+        self.health.mark_stopped()
+        self.assertFalse(dispatch(self.manager, {"op": "livez"}, b"", self.health)["ok"])
+
+    def test_readyz_stays_true_with_nothing_loaded_yet(self) -> None:
+        """A worker that has simply never been given a model can still be given one."""
+        self.health.mark_bound()
+        response = dispatch(self.manager, {"op": "readyz"}, b"", self.health)
+        self.assertTrue(response["ok"])
+        self.assertIsNone(response["resident"])
+
+    def test_readyz_goes_false_after_a_failed_load_with_nothing_resident(self) -> None:
+        self.health.mark_bound()
+
+        def failing_fetch(models_dir: Path, spec: Any) -> list:
+            raise FetchError("the network went away")
+
+        self._module.fetcher.ensure_model = failing_fetch
+        with self.assertRaises(FetchError):
+            self.manager.load("rapidocr-ppocrv5")
+
+        response = dispatch(self.manager, {"op": "readyz"}, b"", self.health)
+        self.assertFalse(response["ok"])
+        self.assertIn("the network went away", " ".join(response["reasons"]))
+
+        # A later successful load clears it: readiness is a current verdict, not a scar.
+        self._module.fetcher.ensure_model = self._real_ensure
+        self._module.fetcher.ensure_model = lambda models_dir, spec: []
+        self.manager.load("rapidocr-ppocrv5")
+        self.assertTrue(dispatch(self.manager, {"op": "readyz"}, b"", self.health)["ok"])
+
+    def test_readyz_reports_an_unwritable_models_directory(self) -> None:
+        self.health.mark_bound()
+        unwritable = Path(self.directory.name) / "locked"
+        unwritable.mkdir()
+        unwritable.chmod(0o500)
+        self.addCleanup(unwritable.chmod, 0o700)
+
+        manager = ModelManager(load_registry(REGISTRY_PATH), unwritable)
+        health = Health(manager)
+        health.mark_bound()
+        response = dispatch(manager, {"op": "readyz"}, b"", health)
+        self.assertFalse(response["ok"])
+        self.assertIn("not writable", " ".join(response["reasons"]))
+
+    def test_a_cold_load_in_flight_does_not_trip_readiness(self) -> None:
+        """The compose healthcheck must survive a first load that downloads 460 MB."""
+        self.health.mark_bound()
+        fetch_started = threading.Event()
+        release = threading.Event()
+
+        def slow_fetch(models_dir: Path, spec: Any) -> list:
+            fetch_started.set()
+            release.wait(timeout=10)
+            return []
+
+        self._module.fetcher.ensure_model = slow_fetch
+        loader = threading.Thread(target=self.manager.load, args=("manga-ocr",))
+        loader.start()
+        self.assertTrue(fetch_started.wait(timeout=10))
+
+        response = dispatch(self.manager, {"op": "readyz"}, b"", self.health)
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["loading"], "manga-ocr")
+
+        release.set()
+        loader.join(timeout=10)
+
+
 class SocketServerTest(unittest.TestCase):
     """The real server over a real unix socket, with a stub manager in place of engines."""
 
@@ -543,9 +654,11 @@ class SocketServerTest(unittest.TestCase):
     class StubManager:
         """Enough of ModelManager for dispatch, returning a deliberately huge result."""
 
-        def __init__(self, registry, line_count: int) -> None:
+        def __init__(self, registry, line_count: int, models_dir: Path) -> None:
             self.registry = registry
             self.loading = None
+            self.models_dir = models_dir
+            self.last_error = None
             self._line_count = line_count
 
         def list(self):
@@ -567,7 +680,7 @@ class SocketServerTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / "ocr.sock"
 
-        manager = self.StubManager(load_registry(REGISTRY_PATH), self.LINES)
+        manager = self.StubManager(load_registry(REGISTRY_PATH), self.LINES, Path(self.directory.name))
         self.server = SocketServer(manager, self.path, idle_timeout=10.0, message_timeout=0.5)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -613,6 +726,15 @@ class SocketServerTest(unittest.TestCase):
 
         response, _payload = protocol.recv_message(sock)
         self.assertEqual(response["error"]["code"], "timeout")
+
+    def test_the_probe_ops_answer_over_the_socket(self) -> None:
+        """What the container healthcheck execs has to work on the real transport."""
+        sock = self.connect()
+        for op in ("livez", "readyz", "startupz"):
+            protocol.send_message(sock, {"op": op})
+            response, _payload = protocol.recv_message(sock)
+            self.assertTrue(response["ok"], f"{op}: {response.get('reasons')}")
+            self.assertEqual(response["probe"], op)
 
     def test_connections_past_the_cap_are_told_they_are_refused(self) -> None:
         held = [self.connect() for _ in range(MAX_CONNECTIONS)]

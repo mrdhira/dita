@@ -6,12 +6,11 @@ import argparse
 import logging
 import os
 import signal
+import socket
 import sys
-import threading
 from pathlib import Path
 
-from . import __version__
-from .http_dev import make_server, parse_address
+from . import __version__, protocol
 from .manager import ModelManager
 from .registry import DEFAULT_REGISTRY_PATH, RegistryError, load_registry
 from .server import SocketDirectoryError, SocketServer
@@ -20,6 +19,11 @@ LOG = logging.getLogger("ocr_worker")
 
 DEFAULT_SOCKET_PATH = "/run/dita/inferences-ocr.sock"
 DEFAULT_MODELS_DIR = "/models"
+
+# --probe name -> the wire op that answers it. The Kubernetes spellings, because the
+# semantics are the ones everybody already knows.
+PROBES = {"live": "livez", "ready": "readyz", "startup": "startupz"}
+PROBE_TIMEOUT = 5.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,16 +44,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to models.yaml (env: MODELS_REGISTRY)",
     )
     parser.add_argument(
-        "--http",
-        metavar="HOST:PORT",
-        default=None,
-        help="also serve the dev-only HTTP mirror; off by default, manual testing only",
-    )
-    parser.add_argument(
         "--preload",
         metavar="MODEL_ID",
         default=os.environ.get("PRELOAD_MODEL") or None,
         help="load this model at startup instead of waiting for the orchestrator to say so",
+    )
+    parser.add_argument(
+        "--probe",
+        choices=sorted(PROBES),
+        default=None,
+        help=(
+            "run one health probe against the socket and exit 0 (pass) or 1 (fail), "
+            "instead of starting a server; this is what the container healthcheck execs"
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -60,12 +67,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def run_probe(socket_path: Path, probe: str) -> int:
+    """Ask a running worker one health question over its own socket.
+
+    Deliberately tiny and dependency-free: a container healthcheck is an exec probe for a
+    service with no HTTP surface, so this has to work with nothing but the stdlib.
+    """
+    op = PROBES[probe]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as sock:
+            sock.settimeout(PROBE_TIMEOUT)
+            sock.connect(str(socket_path))
+            protocol.send_message(sock, {"op": op}, timeout=PROBE_TIMEOUT)
+            response, _payload = protocol.recv_message(sock, PROBE_TIMEOUT, PROBE_TIMEOUT)
+    except (OSError, protocol.ProtocolError, protocol.Timeout, protocol.PeerGone) as exc:
+        print(f"{op}: unreachable at {socket_path}: {exc}", file=sys.stderr)
+        return 1
+
+    passed = bool(response.get("ok"))
+    detail = "; ".join(response.get("reasons") or []) or response.get("status", "")
+    print(f"{op}: {'pass' if passed else 'fail'} {detail}".rstrip())
+    return 0 if passed else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
+
+    if args.probe:
+        return run_probe(Path(args.socket), args.probe)
 
     try:
         registry = load_registry(Path(args.registry))
@@ -85,17 +118,10 @@ def main(argv: list[str] | None = None) -> int:
             LOG.error("preload of %s failed: %s", args.preload, exc)
 
     server = SocketServer(manager, Path(args.socket))
-    http_server = None
-    if args.http:
-        http_server = make_server(manager, parse_address(args.http))
-        threading.Thread(target=http_server.serve_forever, daemon=True, name="ocr-http").start()
-        LOG.warning("dev HTTP mode is on at %s -- do not enable this in production", args.http)
 
     def shutdown(signum: int, _frame: object) -> None:
         LOG.info("signal %s, shutting down", signal.Signals(signum).name)
         server.stop()
-        if http_server is not None:
-            http_server.shutdown()
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)

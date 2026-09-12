@@ -11,8 +11,9 @@ import logging
 import os
 import socket
 import threading
+import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from . import __version__, protocol
 from .engines import ENGINE_NAMES, UnknownEngine
@@ -27,6 +28,84 @@ LOG = logging.getLogger(__name__)
 class SocketDirectoryError(Exception):
     """The socket directory cannot be used, with an explanation of what to change."""
 
+
+class Health:
+    """Liveness, readiness and startup, as protocol ops rather than URL paths.
+
+    The names follow the Kubernetes convention -- `livez` and `readyz`, plus a startup
+    probe -- because the semantics are the ones everybody already knows. (`healthz` is
+    the deprecated spelling and is not offered.) There is no HTTP surface here to hang
+    them off, and adding one purely for probes would mean a TCP listener, an HTTP parser
+    and a second transport to secure; a container healthcheck is an exec probe instead:
+    `python -m ocr_worker --probe ready`.
+
+    Which probe means what:
+
+      livez    the process and its accept loop are up. No dependency checks, nothing that
+               can fail slowly. False means restart me.
+      readyz   I can be given work: socket bound, registry parsed, models dir writable,
+               and either something is resident or a load could still proceed. False means
+               stop routing to me. Note that a cold load does NOT make this false -- a
+               load in flight is progress, not a wedge -- so `resident` in the response is
+               what tells you whether an `infer` would succeed this instant.
+      startupz the one-time boot work finished: socket bound and registry parsed. This is
+               what keeps a slow first start from being killed by a liveness check.
+    """
+
+    def __init__(self, manager: ModelManager) -> None:
+        self._manager = manager
+        self._started_at = time.monotonic()
+        self._bound = False
+        self._stopped = False
+
+    def mark_bound(self) -> None:
+        self._bound = True
+
+    def mark_stopped(self) -> None:
+        self._stopped = True
+
+    def live(self) -> Dict[str, Any]:
+        failures = []
+        if self._stopped:
+            failures.append("the server is shutting down")
+        return self._verdict("livez", failures)
+
+    def startup(self) -> Dict[str, Any]:
+        failures = []
+        if not self._bound:
+            failures.append("the socket is not bound yet")
+        if not self._manager.registry.models:
+            failures.append("the registry parsed to no models")
+        return self._verdict("startupz", failures)
+
+    def ready(self) -> Dict[str, Any]:
+        failures = []
+        if not self._bound or self._stopped:
+            failures.append("the socket is not serving")
+        if not self._manager.registry.models:
+            failures.append("the registry parsed to no models")
+
+        models_dir = self._manager.models_dir
+        if not os.access(models_dir, os.W_OK | os.X_OK):
+            failures.append(f"the models directory {models_dir} is not writable")
+
+        last_error = self._manager.last_error
+        if last_error is not None and self._manager.resident() is None:
+            failures.append(f"nothing is resident and {last_error}")
+
+        verdict = self._verdict("readyz", failures)
+        verdict["resident"] = self._manager.resident()
+        verdict["loading"] = self._manager.loading
+        return verdict
+
+    def _verdict(self, probe: str, failures: list) -> Dict[str, Any]:
+        return {
+            "probe": probe,
+            "status": "pass" if not failures else "fail",
+            "uptime_s": round(time.monotonic() - self._started_at, 3),
+            "reasons": failures,
+        }
+
 SERVICE_NAME = "inferences-ocr"
 LISTEN_BACKLOG = 16
 # Live connections, not just queued ones. Each holds a thread and, mid-message, its
@@ -37,9 +116,18 @@ MAX_CONNECTIONS = 16
 # ECONNRESET instead of the error code.
 REFUSAL_DRAIN_SECONDS = 0.5
 
+# Kubernetes-shaped probe names, mapped to the Health method that answers them.
+PROBE_OPS = {"livez": "live", "readyz": "ready", "startupz": "startup"}
+KNOWN_OPS = ("handshake", "version", "list", "load", "unload", "infer", *PROBE_OPS)
 
-def dispatch(manager: ModelManager, control: Dict[str, Any], payload: bytes) -> Dict[str, Any]:
-    """Turn one request into one response. Pure enough to be reused by the dev HTTP mode."""
+
+def dispatch(
+    manager: ModelManager,
+    control: Dict[str, Any],
+    payload: bytes,
+    health: Optional[Health] = None,
+) -> Dict[str, Any]:
+    """Turn one request into one response. The socket server is a thin wrapper over this."""
     op = control.get("op")
 
     try:
@@ -50,10 +138,14 @@ def dispatch(manager: ModelManager, control: Dict[str, Any], payload: bytes) -> 
                 protocol=protocol.PROTOCOL_VERSION,
                 limits=protocol.limits(),
                 engines=list(ENGINE_NAMES),
+                ops=list(KNOWN_OPS),
                 default_model=manager.registry.default_model,
                 resident=manager.resident(),
                 loading=manager.loading,
             )
+        if op in PROBE_OPS:
+            probe = getattr(health or Health(manager), PROBE_OPS[op])()
+            return {"ok": probe["status"] == "pass", **probe}
         if op == "list":
             return ok(**manager.list())
         if op == "load":
@@ -65,7 +157,10 @@ def dispatch(manager: ModelManager, control: Dict[str, Any], payload: bytes) -> 
             return ok(**manager.unload())
         if op == "infer":
             return ok(**manager.infer(payload))
-        return error("bad_request", f"unknown op {op!r}; expected handshake, version, list, load, unload or infer")
+        return error(
+            "bad_request",
+            f"unknown op {op!r}; expected one of {', '.join(KNOWN_OPS)}",
+        )
 
     except RegistryError as exc:
         return error("unknown_model", str(exc))
@@ -99,9 +194,11 @@ class SocketServer:
         self._sock: socket.socket | None = None
         self._stopping = threading.Event()
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        self.health = Health(manager)
 
     def serve_forever(self) -> None:
         self._sock = self._bind()
+        self.health.mark_bound()
         LOG.info("listening on %s (SOCK_SEQPACKET, protocol %d)", self._socket_path, protocol.PROTOCOL_VERSION)
         try:
             while not self._stopping.is_set():
@@ -126,6 +223,7 @@ class SocketServer:
 
     def stop(self) -> None:
         self._stopping.set()
+        self.health.mark_stopped()
         if self._sock is not None:
             try:
                 self._sock.shutdown(socket.SHUT_RDWR)
@@ -178,7 +276,7 @@ class SocketServer:
                         LOG.debug("connection dropped: %s", exc)
                         return
 
-                    response = dispatch(self._manager, control, payload)
+                    response = dispatch(self._manager, control, payload, self.health)
                     if not _try_send(connection, response):
                         return
         finally:

@@ -26,20 +26,21 @@ docker compose -f deployment/docker-compose.yml up --build
 Every inference worker follows the same shape. `services/inferences-ocr` is the reference
 implementation; its [README](services/inferences-ocr/README.md) has the full protocol.
 
-- **Transport is a unix socket**, `AF_UNIX` / `SOCK_SEQPACKET`, on a docker volume shared
-  between the orchestrator and the workers (`/run/dita/<service>.sock`). No HTTP between
-  Go and Python. Each worker has a dev-only HTTP mode behind a flag, off by default, which
-  is not part of the contract.
+- **Transport is a unix socket**, `AF_UNIX` / `SOCK_SEQPACKET`, in a directory shared
+  between the orchestrator and the workers (`run/` in the repo, `/run/dita` in the
+  containers). There is no HTTP between Go and Python at all, health probes included —
+  the reasoning is in the OCR worker's technical requirement.
 - **Framing** rides on SEQPACKET's message boundaries: a small prologue datagram giving
   the length of the JSON control block and of the binary payload, then both of those in
   chunks of at most 64 KiB. Both are chunked because a single AF_UNIX datagram cannot
   exceed `SO_SNDBUF` (212992 bytes by default) — and a control block listing a dense page's
   OCR lines reaches that ceiling as readily as an image does. From Go that is
   `net.Dial("unixpacket", ...)` with one `Write`/`Read` per datagram and no `bufio`.
-- **Ops** are `handshake`/`version`, `list`, `load`, `unload`, and the worker's own
-  inference op (`infer` for OCR). Every response carries `ok`; failures carry a stable
-  `error.code` plus a human `error.message`. `handshake` advertises the chunk size, the
-  size ceilings and the socket timeouts, so no client hard-codes them.
+- **Ops** are `handshake`/`version`, `list`, `load`, `unload`, the worker's own inference
+  op (`infer` for OCR), and the three health probes `livez`, `readyz` and `startupz`.
+  Every response carries `ok`; failures carry a stable `error.code` plus a human
+  `error.message`. `handshake` advertises the chunk size, the size ceilings and the socket
+  timeouts, so no client hard-codes them.
 - **One model resident per worker.** Several models are *selectable*; never two loaded.
   `load` evicts whatever was there and reports what it evicted, so the orchestrator can
   budget memory as the largest single model rather than the sum. The download happens
@@ -48,10 +49,29 @@ implementation; its [README](services/inferences-ocr/README.md) has the full pro
   lock and serialise work behind it; they never shed load, and they never load a model
   implicitly. Timeouts, retries, rate limiting and backpressure are the Go side's job.
 - **Weights are never committed.** Each worker ships a `models.yaml` pinning every file to
-  an immutable upstream revision with a sha256; the worker fetches into a mounted volume
-  and refuses anything whose digest does not match.
+  an immutable upstream revision with a sha256; the worker fetches into a bind-mounted
+  `models/` directory and refuses anything whose digest does not match. The directory is
+  kept in git by a `.gitkeep`, its contents are gitignored, and `rm -rf` on it is a full
+  reset.
+- **Health is three protocol ops, not three URLs.** `livez` means restart me, `readyz`
+  means stop routing to me, `startupz` means I am still booting. A container healthcheck
+  is an exec probe: `python -m ocr_worker --probe ready`.
+
+A stdlib-only Go reference client lives in
+[`services/inferences-ocr/examples/go`](services/inferences-ocr/examples/go/) and is the
+shape the orchestrator's client will take.
+
+## Docs
+
+Design documents live under `docs/`, one directory per service:
+
+- [`docs/inferences/ocr/[1]technical-requirement.md`](docs/inferences/ocr/%5B1%5Dtechnical-requirement.md)
+  — the OCR worker: context, the wire protocol, the per-engine pipeline boundaries, the
+  alternatives that lost, and the rollout.
 
 ## Repo conventions
 
-Working notes, plans and specs live under `.claude/tasks/`. Agent guidance is in
-[`AGENTS.md`](AGENTS.md); the per-language rule files under `.claude/rules/` are still empty.
+Working notes and plans live under `.claude/tasks/`; anything durable graduates to `docs/`.
+Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under
+`.claude/rules/` are still empty. Repo-level tasks are in the [`Makefile`](Makefile)
+(`make build`, `make test`, `make deps-check`).

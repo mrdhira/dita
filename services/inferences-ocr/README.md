@@ -1,244 +1,334 @@
 # inferences-ocr
 
-The OCR inference worker. A long-lived Python process that holds **exactly one** OCR model
-in memory and answers requests over a unix socket.
+> One OCR model in memory, one unix socket, and nothing else. The Go orchestrator decides what to load; this service does tensors.
 
-It does tensors and nothing else. The Go orchestrator (`services/dita-orchestrator`) owns
-the client-facing HTTP, the request queue, the resource budget, and the decision about
-*which* model should be resident. This service just does what it is told, and says clearly
-when it cannot.
+**Status: v0, in review.** First inference worker in the dita monorepo, and the reference
+shape for `inferences-stt` and `inferences-tts`. The wire protocol is at version 2 and can
+still move before the orchestrator client ships.
 
-- **Engine policy:** ONNXRuntime only. No torch, no Paddle, no CUDA.
-- **Weights policy:** never committed, never baked into the image. `models.yaml` pins them;
-  the fetcher downloads them into the mounted `$MODELS_DIR` and verifies every sha256.
-- **Residency policy:** one model at a time. Loading B unloads A first.
-
-## The model registry
-
-`models.yaml` is the single source of truth for what is selectable. Three models ship with it:
-
-| id | engine | langs | notes |
-| --- | --- | --- | --- |
-| `rapidocr-ppocrv5` | `rapidocr` | ja, en, zh | **The default.** PaddleOCR PP-OCRv5 mobile detection + recognition as ONNX, driven by RapidOCR. ~21 MB of weights. |
-| `tesseract` | `tesseract` | ja, en | The system binary. Nothing is downloaded; the image installs `tesseract-ocr` plus the `eng`, `jpn` and `jpn-vert` language data. |
-| `manga-ocr` | `manga_ocr` | ja | Japanese vertical / manga text specialist, run as two ONNX graphs. ~460 MB of weights. Reads one text block per call, so feed it a crop rather than a page. |
-
-Every `sha256` and `bytes` in `models.yaml` was computed from a real download, not guessed.
-The header comment in that file says so explicitly and says what to do when a digest cannot
-be verified: write `sha256: null`, and the fetcher will refuse to load the model rather than
-accept unknown bytes.
-
-### How to add a model
-
-1. **Find the files.** You need an immutable Hugging Face commit sha, not a branch name.
-   `curl -s https://huggingface.co/api/models/<repo> | jq -r .sha` gives you one.
-2. **Get the real digests.** Download each file once and hash it:
-   ```bash
-   curl -sL "https://huggingface.co/<repo>/resolve/<sha>/<path>" -o /tmp/f
-   sha256sum /tmp/f && stat -c %s /tmp/f
-   ```
-   For LFS-tracked files you can cross-check against `lfs.oid` in
-   `https://huggingface.co/api/models/<repo>/tree/main?recursive=true`, which is the sha256.
-3. **Add the entry** to `models.yaml`: `id`, `description`, `engine`, `langs`, `source`,
-   `files[]`, `options`. A file may override `repo`/`revision` when one logical model is
-   assembled from more than one upstream repo, which is how `rapidocr-ppocrv5` pulls its
-   detector and its recogniser from two different PaddlePaddle repos.
-4. **Pick an engine.** If it is one of `rapidocr`, `tesseract`, `manga_ocr`, you are done.
-   Otherwise add an adapter under `ocr_worker/engines/`: subclass `Engine`, implement
-   `infer(image_bytes) -> Result`, and wire the name into `ocr_worker/engines/__init__.py`.
-5. **Run the tests** (`python -m unittest discover -s tests -t .`) — they assert that every
-   downloadable file in the registry carries a 64-character digest.
-
-## Running it
-
-### With compose (how it actually runs)
+## TL;DR
 
 ```bash
 docker compose -f deployment/docker-compose.yml up --build inferences-ocr
 ```
 
-The socket lands on the shared `dita-sockets` volume at `/run/dita/inferences-ocr.sock`;
-weights are cached on the `ocr-models` volume. The container runs as the non-root `ocr`
-user and starts with **no model loaded** — the orchestrator decides what to load.
+- **Japanese and English** from one model: PaddleOCR PP-OCRv5 mobile, as ONNX, driven by RapidOCR
+- **ONNXRuntime only.** No torch, no Paddle, no CUDA — `pip list | grep -i torch` in the image returns nothing
+- **One model resident, ever.** `load` evicts whatever was there and tells you what it evicted, so memory budgets are "the largest model", not "the sum"
+- **Weights are never committed and never baked into the image.** `models.yaml` pins every file to an immutable upstream revision with a sha256; the fetcher refuses anything else
+- **Not HTTP.** `AF_UNIX` `SOCK_SEQPACKET`, same kernel, no TCP stack and no HTTP parser — see [Why](#why)
+- **Three models selectable:** PP-OCRv5 (default), the system tesseract binary, and manga-ocr for Japanese vertical text
+- Health probes are protocol ops, not URLs: `livez`, `readyz`, `startupz`
+
+## What is this?
+
+A long-lived Python process that holds exactly one OCR model and answers requests over a unix
+socket. It owns model residency and inference. It does not own the queue, the retry policy,
+the resource budget, or the decision about which model should be loaded — all of that belongs
+to `services/dita-orchestrator`, which is the only thing that talks to it.
+
+### The registry
+
+`models.yaml` is the single source of truth for what is selectable.
+
+| id | engine | langs | weights | notes |
+| --- | --- | --- | --- | --- |
+| `rapidocr-ppocrv5` | `rapidocr` | ja, en, zh | 21 MB | **The default.** PP-OCRv5 mobile detection + recognition as ONNX. |
+| `tesseract` | `tesseract` | ja, en | none | The system binary; the image installs `eng`, `jpn` and `jpn-vert`. A baseline, not a recommendation. |
+| `manga-ocr` | `manga_ocr` | ja | 460 MB | Japanese vertical and manga text. Reads one block per call, so feed it a crop. |
+
+Every `sha256` and `bytes` in that file was computed from a real download, not guessed. When
+a digest cannot be verified the rule is to write `sha256: null`, and the fetcher then refuses
+to load the model rather than accept unknown bytes.
+
+### Who owns which part of the pipeline
+
+The three adapters look very different, and that is a boundary difference rather than an
+inconsistency. Each engine hands us a different amount of the work already done.
+
+| Engine | What the upstream owns | What this service owns |
+| --- | --- | --- |
+| **RapidOCR (PP-OCRv5)** | everything: resize, DBNet detection, box unclipping, CRNN recognition, CTC decode with its softmax and blank-collapsing, confidence averaging | almost nothing — pick the pinned ONNX files, supply the label set, choose BGR order, reshape the result |
+| **Tesseract** | everything: binarisation, layout analysis, recognition, its own confidences | fold its one-row-per-word TSV back into lines; normalise nothing |
+| **manga-ocr** | nothing — it ships a bare encoder graph, a bare decoder graph and a vocabulary | all of it: greyscale, resize, normalise, run the encoder, greedy-decode the decoder with an EOS stop, softmax the winning logit into a confidence, map ids back through the vocabulary, assemble the line |
+
+The softmax in the manga-ocr loop deserves a word, since RapidOCR has no equivalent in our
+code. `argmax` picks the next token straight from the logits and needs no normalisation; the
+softmax exists **only** to turn that winning logit into a probability, so the per-token
+numbers are comparable and their mean is a meaningful line confidence. Without it the field
+would carry a raw logit, which is not on any scale a caller can reason about. RapidOCR does
+the same thing inside its own CTC decoder — we just never see it.
+
+Each adapter's module docstring says this again in more detail, next to the code it governs.
+
+## How to use it
+
+### With compose
+
+```bash
+docker compose -f deployment/docker-compose.yml up --build inferences-ocr
+```
+
+The socket appears at `run/inferences-ocr.sock` in the repo and the weights land in
+`services/inferences-ocr/models/`. Both are bind mounts, so they can be inspected with `ls`,
+and `rm -rf services/inferences-ocr/models/*` is a complete reset. Their contents are
+gitignored; the directories themselves are kept by a `.gitkeep`.
+
+The container starts with **no model loaded** — that is the orchestrator's call.
 
 ### Locally
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-MODELS_DIR=./models SOCKET_PATH=/tmp/ocr.sock .venv/bin/python -m ocr_worker
+MODELS_DIR=./models SOCKET_PATH=../../run/inferences-ocr.sock .venv/bin/python -m ocr_worker
 ```
 
-Useful flags: `--preload <model id>` to load something at startup, `--log-level debug`,
-`--registry` to point at a different `models.yaml`.
+Useful flags: `--preload <model id>`, `--log-level debug`, `--registry` for a different
+`models.yaml`, `--probe live|ready|startup` for a one-shot health check.
 
-### Dev HTTP mode
+### From Python
 
-Off unless you ask for it. For poking at the worker by hand, never for production:
+There is no HTTP debug mode. This is the whole client:
 
-```bash
-python -m ocr_worker --http 127.0.0.1:8099
-curl -s localhost:8099/handshake
-curl -s localhost:8099/list
-curl -s -X POST localhost:8099/load -d '{"id":"rapidocr-ppocrv5"}'
-curl -s -X POST localhost:8099/infer --data-binary @page.png
+```python
+import json, socket
+
+MAX_CHUNK = 64 * 1024
+
+def call(sock, op, payload=b"", **fields):
+    control = json.dumps({**fields, "op": op}).encode()
+    sock.send(json.dumps({"protocol": 2, "control_len": len(control),
+                          "payload_len": len(payload)}).encode())
+    for blob in (control, payload):
+        for i in range(0, len(blob), MAX_CHUNK):
+            sock.send(blob[i:i + MAX_CHUNK])
+
+    head = json.loads(sock.recv(MAX_CHUNK))
+    body = b""
+    while len(body) < head["control_len"]:
+        body += sock.recv(MAX_CHUNK)
+    return json.loads(body)
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+s.connect("../../run/inferences-ocr.sock")
+print(call(s, "list")["models"])
+print(call(s, "load", id="rapidocr-ppocrv5"))
+print(call(s, "infer", open("page.png", "rb").read())["text"])
 ```
 
-## The wire protocol
+### From Go
 
-**Transport:** `AF_UNIX` / `SOCK_SEQPACKET`, bound at `$SOCKET_PATH` with mode `0660`.
-Protocol version 2.
+A complete, stdlib-only reference client lives in
+[`examples/go/`](examples/go/) — run it with `go run . -image page.png`. That is the shape the
+orchestrator will follow.
 
-**Framing.** SEQPACKET preserves message boundaries and ordering, so a message needs no
-length prefix — only a count of the bytes that follow it. A message has three parts:
+### The wire protocol
+
+**Transport:** `AF_UNIX` / `SOCK_SEQPACKET` at `$SOCKET_PATH`, mode `0660`. Protocol 2.
+
+**Framing.** SEQPACKET preserves message boundaries, so a message carries no length prefix,
+only a count of the bytes that follow:
 
 ```
-datagram 0     : the prologue, a small fixed-shape JSON object:
-                 {"protocol": 2, "control_len": N, "payload_len": M}
+datagram 0     : the prologue — {"protocol": 2, "control_len": N, "payload_len": M}
 next datagrams : the control block, in chunks of at most 65536 bytes
 next datagrams : the payload, in chunks of at most 65536 bytes
 ```
 
-A length of 0 means that section sends no datagrams at all. No conforming datagram is ever
-empty, so an empty read means the peer closed.
-
-**Both sections are chunked, and this matters.** A single AF_UNIX datagram cannot exceed
-`SO_SNDBUF` — 212992 bytes on a default Linux kernel. Above that, `send` fails with
-`EMSGSIZE`; it does not fragment, and a larger datagram cannot be sent at all. A dense page
-produces thousands of lines, and an `infer` response runs about 120 bytes per line, so the
-control block reaches that ceiling as readily as an image does. Chunking both is what keeps
-a 4000-line result sendable.
-
-The receive buffer is exactly one chunk. A peer that sends a larger datagram is caught by
-`MSG_TRUNC` and answered with `bad_request`, rather than being silently truncated.
-
-**Limits**, all advertised in the `handshake` response under `limits` so a client never has
-to hard-code them:
-
-| field | value | meaning |
-| --- | --- | --- |
-| `max_chunk` | 65536 | largest datagram either side may send |
-| `max_control` | 8 MiB | largest control block, roughly 70000 OCR lines |
-| `max_payload` | 64 MiB | largest image |
-| `idle_timeout_s` | 300 | how long an open connection may sit between messages |
-| `message_timeout_s` | 30 | how long a half-sent message may stall before it is dropped |
-
-The server accepts at most 16 concurrent connections. Beyond that it answers `busy` and
-closes, rather than spawning unbounded threads that each hold buffered chunks.
+Both sections are chunked, and that matters: an AF_UNIX datagram cannot exceed `SO_SNDBUF`
+(212992 bytes by default), above which `send` fails with `EMSGSIZE` rather than fragmenting.
+A dense page's result runs past that ceiling as readily as an image does. The receive buffer
+is exactly one chunk, and a larger datagram is caught by `MSG_TRUNC` rather than silently cut.
 
 **Ops.**
 
-| op | request fields | response |
+| op | request | response |
 | --- | --- | --- |
-| `handshake` / `version` | — | `service`, `version`, `protocol`, `limits`, `engines[]`, `default_model`, `resident`, `loading` |
-| `list` | — | `models[]` (id, description, engine, langs, source_type, files, bytes, unverified_files), `default_model`, `resident`, `loading` |
-| `load` | `id` | `id`, `engine`, `already_resident`, `load_ms`, `unloaded` (the model that was evicted, or null — always present) |
-| `unload` | — | `unloaded` (id or null) |
-| `infer` | payload = encoded image bytes (PNG/JPEG/...) | `text`, `lines[]`, `model`, `infer_ms` |
+| `handshake` / `version` | — | `service`, `version`, `protocol`, `limits`, `engines[]`, `ops[]`, `default_model`, `resident`, `loading` |
+| `list` | — | `models[]`, `default_model`, `resident`, `loading` |
+| `load` | `id` | `id`, `engine`, `already_resident`, `load_ms`, `unloaded` (always present) |
+| `unload` | — | `unloaded` |
+| `infer` | payload = encoded image bytes | `text`, `lines[]`, `model`, `infer_ms` |
+| `livez` | — | `probe`, `status`, `uptime_s`, `reasons[]` |
+| `readyz` | — | the same, plus `resident` and `loading` |
+| `startupz` | — | `probe`, `status`, `uptime_s`, `reasons[]` |
+
+**Limits**, all advertised under `limits` in the handshake so nothing is hard-coded:
+`max_chunk` 65536, `max_control` 8 MiB, `max_payload` 64 MiB, `idle_timeout_s` 300,
+`message_timeout_s` 30. At most 16 concurrent connections; past that the answer is `busy`.
 
 Every response carries `ok`. A failure is `{"ok": false, "error": {"code", "message"}}` with
-one of: `bad_request`, `unknown_model`, `unsupported_engine`, `checksum_mismatch`,
+one of `bad_request`, `unknown_model`, `unsupported_engine`, `checksum_mismatch`,
 `fetch_failed`, `no_model_loaded`, `timeout`, `busy`, `response_too_large`, `internal`.
 
-`resident` is the model that can answer `infer` right now. `loading` is the id of a model
-being fetched, if any — a load downloads before it evicts, so during a fetch `resident` is
-still the previous model and it still serves requests.
-
-**The infer result.**
+An `infer` result:
 
 ```json
-{
-  "ok": true,
-  "text": "Hello dita OCR 2026\nThe quick brown fox\n日本語のテキスト認識",
-  "lines": [
-    {"text": "Hello dita OCR 2026", "confidence": 0.96812,
-     "box": [[37.0, 41.0], [509.0, 40.0], [510.0, 90.0], [37.0, 91.0]]}
-  ],
-  "model": "rapidocr-ppocrv5",
-  "infer_ms": 966.2
-}
+{"ok": true,
+ "text": "Hello dita OCR 2026\nThe quick brown fox\n日本語のテキスト認識",
+ "lines": [{"text": "Hello dita OCR 2026", "confidence": 0.96812,
+            "box": [[37.0, 41.0], [509.0, 40.0], [510.0, 90.0], [37.0, 91.0]]}],
+ "model": "rapidocr-ppocrv5", "infer_ms": 966.2}
 ```
 
-`text` is the lines joined with newlines. `box` is four `[x, y]` corners in source-image
-pixels, clockwise from top-left; it is `null` for engines that do not localise text
-(`manga-ocr` returns one line and no box). `confidence` is 0..1, or `null` when the engine
-does not report one.
+`box` is four `[x, y]` corners in source pixels, clockwise from top-left, or `null` for
+engines that do not localise text. `confidence` is 0..1, or `null`.
 
-**Loading is not implicit.** `infer` with nothing resident returns `no_model_loaded` rather
-than quietly loading the default. Choosing what to load is the orchestrator's job, and a
-load can mean a multi-hundred-megabyte download.
+`infer` with nothing resident returns `no_model_loaded`. It does not quietly load the
+default: choosing what is resident is the orchestrator's job, and a load can mean a
+multi-hundred-megabyte download.
 
-## How Go integrates
+### Health probes
 
-The orchestrator speaks this same socket. Nothing in this service is HTTP-shaped, and the
-dev HTTP mode is not part of the contract.
+Three ops, named after the Kubernetes convention so the semantics are recognisable.
+`/healthz` has been deprecated since Kubernetes v1.16 and is deliberately not offered.
 
-- **Dial:** `net.Dial("unixpacket", "/run/dita/inferences-ocr.sock")`. Go's `unixpacket`
-  network *is* `SOCK_SEQPACKET`, so the framing above maps directly: one `Write` per
-  datagram, one `Read` per datagram, with a read buffer of `max_chunk`. Read the prologue,
-  then read `control_len` bytes worth of datagrams, then `payload_len` bytes worth. Do not
-  wrap the connection in `bufio` — that would destroy the message boundaries the protocol
-  relies on. **Never write more than `max_chunk` in one call**; the kernel rejects the whole
-  datagram rather than splitting it.
-- **Handshake once per connection** and check `protocol`. A worker that answers a protocol
-  number you do not know is a worker you should not drive. Take `max_chunk` and the two
-  timeouts from `limits` instead of hard-coding them.
-- **Set deadlines.** The worker drops a connection that stalls mid-message after
-  `message_timeout_s` and an idle one after `idle_timeout_s`, answering `timeout` first
-  where it still can. Mirror those with `SetDeadline` on the Go side.
-- **The orchestrator owns the queue.** This worker holds one exclusive lock, so concurrent
-  `infer` calls serialise behind it; it will not reject or shed load, except past 16
-  concurrent connections where it answers `busy`. Rate limiting, timeouts, retries and
-  backpressure belong on the Go side.
-- **The orchestrator owns model choice.** Call `list` to see what is selectable, `load` to
-  select. `load` always returns `unloaded`, so the orchestrator knows what it evicted.
-  Because a load can be slow (download + session init), treat it as a control-plane
-  operation, not something to do per request. A request whose model is not resident should
-  either queue behind one `load` or be answered from the resident model, whichever the
-  policy says — the worker will not make that decision.
-- **A load downloads before it evicts.** While a fetch is running, `loading` names the
-  incoming model and `resident` still names the outgoing one, which keeps answering `infer`.
-  A failed fetch therefore leaves the working model in place; only a failure to *construct*
-  the new engine, after the fetch succeeded, leaves nothing resident.
-- **The one-model invariant is enforced here, not there.** Asking for B while A is resident
-  always evicts A. There is no way to get two models loaded, so the Go side can budget memory
-  as "the largest single model", not "the sum".
-- **Failure handling:** `error.code` is the stable part of an error; `error.message` is for
-  humans and logs. `checksum_mismatch` and `fetch_failed` mean the model is unusable and a
-  retry of `infer` will not help — retry the `load`, or pick a different model.
+| probe | true when | false means |
+| --- | --- | --- |
+| `livez` | the process and its accept loop are up; no dependency checks | **restart me** |
+| `readyz` | socket bound, registry parsed, models dir writable, and either something is resident or a load could still proceed | **stop routing to me** |
+| `startupz` | the one-time boot work finished: socket bound, registry parsed | **do not kill me, I am still booting** |
 
-## Deviations worth knowing
-
-- **PP-OCRv5 recognition keys.** The PaddlePaddle ONNX export carries no `character`
-  metadata, which is where RapidOCR normally reads the CTC label set from. On first load the
-  worker writes `rec_keys.txt` next to the model, taking the labels from
-  `PostProcess.character_dict` in the pinned (and checksummed) `inference.yml`.
-- **Angle classification is off** for `rapidocr-ppocrv5` (`use_cls: false`) — one fewer model
-  file, and RapidOCR's vertical padding handles the common cases. Turn it on in `options` and
-  add the cls model to `files[]` if rotated-180 text starts mattering.
-- **manga-ocr skips jaconv.** Upstream runs a half-width to full-width conversion over its
-  output; this port does the whitespace and ellipsis normalisation but not that conversion,
-  to keep the dependency set small.
-- **Tesseract line assembly.** Tesseract emits one TSV row per word. The adapter folds rows
-  back into lines and joins Japanese runs without spaces, since spacing them would corrupt
-  the text.
-
-## Tests
+A container healthcheck is an exec probe, which is the standard for a service with no HTTP
+surface:
 
 ```bash
-cd services/inferences-ocr && python -m unittest discover -s tests -t .
+python -m ocr_worker --probe ready   # exits 0 on pass, 1 on fail
 ```
 
-Stdlib only, no network, no weights. 36 tests covering:
+Two things worth knowing. A cold load does **not** make `readyz` false — a download in flight
+is progress, not a wedge — so a first `load` of manga-ocr's 460 MB cannot trip the
+healthcheck. And `readyz` answers "can I be given work", including a `load`; the `resident`
+field in its response is what tells you whether an `infer` would succeed this instant.
 
-- **Framing** — a control block four times larger than `SO_SNDBUF`, a peer that announces a
-  payload and then stalls, a peer that closes mid-message, an oversized datagram, and
-  lengths past the ceilings.
-- **The real server over a real socket** — the oversized response arriving intact, a stalled
-  peer getting `timeout` rather than a reset, and the 17th connection getting `busy`.
-- **The registry** — parsing, id validation against path traversal, and the rule that every
-  downloadable file carries a digest.
-- **The fetcher** — a bad digest, a corrupt cache, an oversized download, a hostile
-  `HF_ENDPOINT` scheme, and that a verified file is not re-hashed on the next load.
-- **The one-model invariant** — sampled from *inside* the critical section, under 24
-  concurrent loads, under a failed fetch, and while a download is in flight.
-- **`dispatch`** — handshake, list, load, unload and the error paths.
+### How Go integrates
+
+- **Dial** `net.Dial("unixpacket", "/run/dita/inferences-ocr.sock")`. Go's `unixpacket` *is*
+  `SOCK_SEQPACKET`, so the framing maps directly: one `Write` per datagram, one `Read` per
+  datagram, read buffer of `max_chunk`. No `bufio` — it would destroy the boundaries.
+- **Handshake once per connection** and check `protocol`. Take the limits and timeouts from
+  the response instead of hard-coding them.
+- **Set deadlines** to match `idle_timeout_s` and `message_timeout_s`.
+- **The orchestrator owns the queue.** The worker holds one exclusive lock, so concurrent
+  `infer` calls serialise; it never sheds load except past 16 connections.
+- **The orchestrator owns model choice.** A load downloads *before* it evicts, so during a
+  fetch `loading` names the incoming model while `resident` still names the outgoing one and
+  keeps serving. A failed fetch leaves the working model in place.
+
+## Why
+
+**Why not HTTP.** The orchestrator and the worker are on the same host, in the same pod, on
+the same kernel. An HTTP surface would mean a TCP listener, an HTTP parser, a framing
+library, and a server dependency such as FastAPI or uvicorn — all to move bytes between two
+processes that could pass them through a socket the kernel already owns. It would also mean
+a second transport to secure and to keep in sync. `AF_UNIX` `SOCK_SEQPACKET` gives message
+boundaries for free, which is most of what a framing layer does, and filesystem permissions
+give access control without a token. The trade is that a client has to implement about forty
+lines of framing; `examples/go/` is that, in the standard library, once.
+
+The same argument retired the dev-only HTTP mode this service used to carry: it duplicated
+the surface, it had its own bugs, and the Python snippet above replaces it.
+
+**Why one model at a time.** Several models are *selectable*, never co-resident. That turns a
+memory budget into a single number — the largest model, not the sum — which is what makes
+`mem_limit: 2g` a promise rather than a hope. It also means a load is a control-plane event
+with a visible cost, so the orchestrator schedules it rather than stumbling into it.
+
+**Why pinned digests.** Model weights come from someone else's repository. Pinning a commit
+sha and a sha256 makes a silent upstream change into a loud failure, and `sha256: null` makes
+an unverified model unloadable instead of quietly trusted.
+
+**Why not tesseract as the default.** It is a system C++ binary and a genuinely useful
+baseline, but on Japanese it is not close. For an image reading `日本語のテキスト認識` it
+returns `AA 告 の テキ ス ト 認識`, where PP-OCRv5 is exact. It stays in the registry as a
+cheap fallback. (`pytesseract` would add a dependency for nothing: it shells out to the same
+binary and re-parses the same TSV we already parse for boxes.)
+
+## Cost
+
+Read it as a price list. Two columns, because the gap between them is the point: the
+container is capped at `cpus: 1.0`, and OCR is CPU-bound, so the limit is most of the price.
+x86-64 Linux, PP-OCRv5 mobile under ONNXRuntime CPU, weights already fetched unless stated.
+
+| Situation | Host, uncapped | Container, `cpus: 1.0` |
+| --- | --- | --- |
+| `load` — cold, downloads 21 MB and verifies four digests | **6.1 s** | — |
+| `load` — warm, ONNX sessions only | **0.3–1.3 s** | **3.6 s** |
+| `infer` — 900×300 page, 3 lines | **1.0–1.6 s** | **7.6 s** |
+| `infer` — 3600×4400 page, 900 lines, 221 KB response | **33.9 s** | **359.6 s** |
+| `load` of `manga-ocr` — cold, 460 MB | — | **16.6 s** |
+| `load` of `manga-ocr` — warm | **2.4–5.7 s** | — |
+
+Ranges are run-to-run spread on an otherwise busy machine, not error bars; treat them as
+orders of magnitude rather than benchmarks.
+
+What to take from it:
+
+- **Load latency is not in the request path.** Once a model is resident, `load` costs
+  nothing — the steady-state number is the `infer` row.
+- **One core is the constraint, not memory.** Give the container two cores before giving it
+  more RAM.
+- **A dense page is a different workload.** 900 lines is 900 recognition passes, and it
+  scales with line count, not page area. If that becomes a real input, batch it or raise the
+  CPU allocation; do not expect the 3-line number.
+
+Memory and size:
+
+| | |
+| --- | --- |
+| Resident, PP-OCRv5 | ~140 MB, plus ~100 MB transient during an inference |
+| Peak RSS with manga-ocr resident | ~790 MB — the reason `mem_limit` is 2g |
+| Image | 1.21 GB, mostly opencv's GL dependencies and tesseract's language data |
+
+## Contributions
+
+```bash
+# build
+docker compose -f deployment/docker-compose.yml build inferences-ocr   # or: make build
+
+# test — stdlib only, no network, no weights
+cd services/inferences-ocr && python -m unittest discover -s tests -t .  # or: make test
+
+# dependencies
+make deps-check      # uv pip list --outdated against the service venv
+```
+
+44 tests covering the framing (a control block four times larger than `SO_SNDBUF`, a peer
+that announces a payload then stalls, a peer that closes mid-message, oversized datagrams),
+the real server over a real socket, the health probes, the registry parser and its id
+validation, the fetcher's refusal of bad, oversized or unpinned files, the full `dispatch`
+surface, and the one-model invariant sampled from inside the critical section under
+concurrent loads, a failed fetch, and a download in flight.
+
+There is no linter configured yet; `.claude/rules/PYTHON-CODE-GUIDELINES.md` is still empty,
+so house style here is "match the file you are in".
+
+### Adding a model
+
+1. Get an immutable commit sha: `curl -s https://huggingface.co/api/models/<repo> | jq -r .sha`.
+2. Download each file once and hash it: `sha256sum` and `stat -c %s`. For LFS files, cross-check
+   against `lfs.oid` in `https://huggingface.co/api/models/<repo>/tree/main?recursive=true`.
+3. Add the entry to `models.yaml`. A file may override `repo`/`revision`, which is how
+   `rapidocr-ppocrv5` assembles its detector and recogniser from two different repos.
+4. If the engine is not `rapidocr`, `tesseract` or `manga_ocr`, add an adapter under
+   `ocr_worker/engines/`: subclass `Engine`, implement `infer`, register the name.
+5. Run the tests — they assert every downloadable file carries a 64-character digest.
+
+## Suggestions
+
+Things this service does not do, in rough order of when they will start to hurt.
+
+- **No fd-passing or shared memory.** Every image is copied through the socket in 64 KiB
+  chunks. Fine at 1.2 s per page; worth revisiting if batch throughput ever matters.
+- **No cancel op.** A `load` in flight cannot be aborted. A Go-side timeout abandons the
+  response, not the download.
+- **manga-ocr re-runs the decoder over the whole prefix each step**, because the exported
+  graph has no key/value cache. That is quadratic in output length. Re-export with a cache if
+  it becomes the hot path.
+- **manga-ocr skips jaconv** half-width to full-width conversion, which upstream applies.
+- **Angle classification is off** for PP-OCRv5 (`use_cls: false`): one fewer file for a case
+  our inputs do not have. Turn it on in `options` and add the cls model to `files[]` if
+  rotated text starts appearing.
+- **A failed engine *build* leaves nothing resident**, deliberately. The fetch happens first,
+  so a network failure is harmless, but once the swap starts the old engine is released
+  before the new one is constructed. Keeping both alive would break the one-model invariant.

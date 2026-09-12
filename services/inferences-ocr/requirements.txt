@@ -1,12 +1,9 @@
-# Pinned with upper bounds so a new major cannot arrive on a rebuild.
-# No torch, no paddle: ONNXRuntime is the only inference runtime here.
-rapidocr>=3.9,<4
-onnxruntime>=1.22,<2
-numpy>=2.0,<3
-pillow>=11.0,<12
-pyyaml>=6.0,<7
+rapidocr>=3.9.2,<4
+onnxruntime>=1.30,<2
+numpy>=2.5,<3
+pillow>=12.3,<13
+pyyaml>=6.0.3,<7
 
-# rapidocr depends on the non-headless opencv_python distribution, so we pin that one
-# rather than opencv-python-headless -- asking for headless would land two copies of cv2
-# in the image. The Dockerfile installs the handful of GL/glib shared libraries it wants.
-opencv-python>=4.10,<6
+# rapidocr depends on the non-headless opencv_python, so pin that one: asking for
+# opencv-python-headless would land two copies of cv2 in the image.
+opencv-python>=5.0,<6

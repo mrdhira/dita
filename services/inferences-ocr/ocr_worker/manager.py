@@ -42,10 +42,22 @@ class ModelManager:
         # One attribute so a lock-free reader can never see a half-updated pair.
         self._resident: Optional[Tuple[ModelSpec, float]] = None
         self._loading: Optional[str] = None
+        # Sticky until the next successful load or an unload. Readiness uses it to tell a
+        # worker that simply has nothing loaded yet from one whose last load failed.
+        self._last_error: Optional[str] = None
 
     @property
     def registry(self) -> Registry:
         return self._registry
+
+    @property
+    def models_dir(self) -> Path:
+        return self._models_dir
+
+    @property
+    def last_error(self) -> Optional[str]:
+        """Why the most recent load failed, or None if the last one worked."""
+        return self._last_error
 
     def list(self) -> Dict[str, Any]:
         return {
@@ -81,6 +93,13 @@ class ModelManager:
         if already is not None:
             return already
 
+        try:
+            return self._load(spec, started)
+        except Exception as exc:  # noqa: BLE001 - recorded for readiness, then re-raised
+            self._last_error = f"load of {spec.id} failed: {type(exc).__name__}: {exc}"
+            raise
+
+    def _load(self, spec: ModelSpec, started: float) -> Dict[str, Any]:
         # Phase 1: get the bytes on disk. No exclusive lock, nothing released yet, so the
         # currently resident model keeps serving and survives a failed fetch untouched.
         with self._fetch_lock:
@@ -105,6 +124,7 @@ class ModelManager:
             self._engine = engine
             self._resident = (spec, time.monotonic())
 
+        self._last_error = None
         load_ms = round((time.monotonic() - started) * 1000, 1)
         LOG.info("loaded %s in %sms (unloaded %s)", spec.id, load_ms, previous or "nothing")
         return {
@@ -119,6 +139,7 @@ class ModelManager:
         with self._lock:
             previous = self._resident[0].id if self._resident else None
             self._release()
+            self._last_error = None
         if previous:
             LOG.info("unloaded %s", previous)
         return {"unloaded": previous}

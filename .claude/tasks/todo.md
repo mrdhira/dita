@@ -22,7 +22,7 @@ Plan for the OCR inference worker + the Go integration contract. Legend: `[ ]` t
   - [x] 3c. `ocr_worker/server.py` + `protocol.py` — UDS (`SOCK_SEQPACKET`): `handshake/version` · `list` · `load` · `infer` · `unload`
   - [x] 3d. `infer` path — image bytes → text (+ boxes/confidence) via RapidOCR (also Tesseract and manga-ocr)
   - [x] 3e. `requirements.txt` — pinned with upper bounds (rapidocr, onnxruntime, numpy, pillow, pyyaml, opencv)
-  - [x] 3f. `Dockerfile` — `python:3.12-slim-bookworm`, non-root, no torch
+  - [x] 3f. `Dockerfile` — `python:3.14-slim-trixie`, non-root, no torch
 - [x] 4. `deployment/docker-compose.yml` — add the service (shared socket volume, models volume, mem/cpu caps, restart policy).
 - [x] 5. `services/inferences-ocr/README.md` — purpose, model registry, adding a model, running it, the wire protocol.
 - [x] 6. Root `README.md` (was empty) — service index + the Go↔Python contract in brief.
@@ -49,7 +49,7 @@ Plan for the OCR inference worker + the Go integration contract. Legend: `[ ]` t
 | path | what |
 | --- | --- |
 | `services/inferences-ocr/models.yaml` | The registry. Three models, every digest real. |
-| `services/inferences-ocr/ocr_worker/` | `registry.py`, `fetcher.py`, `manager.py`, `protocol.py`, `server.py`, `http_dev.py`, `__main__.py`, `engines/{base,rapidocr_engine,tesseract_engine,manga_ocr_engine}.py`. |
+| `services/inferences-ocr/ocr_worker/` | `registry.py`, `fetcher.py`, `manager.py`, `protocol.py`, `server.py`, `__main__.py`, `engines/{base,rapidocr_engine,tesseract_engine,manga_ocr_engine}.py`. |
 | `services/inferences-ocr/tests/test_worker.py` | 14 stdlib-only tests, no network, no weights. |
 | `services/inferences-ocr/{requirements.txt,Dockerfile,.dockerignore,README.md}` | Pins, image, docs. |
 | `deployment/docker-compose.yml` | The `inferences-ocr` service + the two volumes. |
@@ -160,3 +160,31 @@ live engines from *inside* the critical section.
 8. **The download lock is separate from the exclusive lock.** Two callers cannot fetch at
    once, but a fetch never blocks inference. There is still no cancel op for a load in
    flight; a Go-side timeout abandons the response, not the download.
+
+---
+
+## PR #1 review round 1 — Dhira's 12 comments
+
+The loose spec that used to sit beside this file is gone: it is now
+`docs/inferences/ocr/[1]technical-requirement.md`, in the house technical-design format, and
+it absorbed the per-engine pipeline boundaries, the pre/post asymmetry answer and the
+transport rationale.
+
+| # | Item | What changed |
+| --- | --- | --- |
+| 1 | Spec → technical requirement | Moved and rewritten as `docs/inferences/ocr/[1]technical-requirement.md`; `.claude/tasks/inferences-ocr-spec.md` deleted. |
+| 2 | Named volumes → bind mounts | `run/` and `services/inferences-ocr/models/`, both `.gitkeep`-tracked with gitignored contents. |
+| 3 | Python 3.14 | `python:3.14-slim-trixie`. OS suffix pinned because the apt names are release-specific. |
+| 4 | README shape | Rewritten in the w-tools shape: Status, TL;DR, What, How, Why, Cost, Contributions, Suggestions. |
+| 5 | requirements.txt | pillow floor fixed to `>=12.3,<13`; every other floor raised to the verified version; comments cut to one line. `make deps-check` plus a weekly workflow. |
+| 6+7 | Per-engine pipeline | A table in the tech requirement and a module docstring on each adapter, saying who owns what and why the asymmetry is a boundary difference. |
+| 8 | Tesseract note | Recorded at the top of `tesseract_engine.py`: system C++ binary, `pytesseract` adds nothing, good on Latin and poor on Japanese (measured). |
+| 9 | Transport rationale | "Why not HTTP" in the README and in Alternatives, with the measured numbers. |
+| 10 | Dev HTTP mode | `http_dev.py` and `--http` deleted; a Python snippet in the README and the Go example replace it. |
+| 11 | Go example | `examples/go/`, stdlib only, run live against the worker in both scripts. |
+| 12 | Health probes | `livez` / `readyz` / `startupz` as protocol ops, a `--probe` CLI, compose healthcheck, and `depends_on: service_healthy`. |
+
+Tests went 36 → 44 (the probes, over the socket and in isolation). The full evidence is in
+the session report; the short version is that the Go client printed real Japanese OCR text
+against both a host worker and a containerised one, and compose gated the orchestrator on
+the worker's health.

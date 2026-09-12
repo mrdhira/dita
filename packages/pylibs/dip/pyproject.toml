@@ -1,0 +1,19 @@
+[project]
+name = "dip"
+version = "0.1.0"
+description = "Dita Inference Protocol: the framing, the error taxonomy and both roles"
+readme = "README.md"
+requires-python = ">=3.14.6"
+# Empty on purpose, and an acceptance criterion rather than a preference: a library that
+# every worker links must not drag a supply chain behind it. Everything here is stdlib.
+dependencies = []
+
+[dependency-groups]
+dev = ["coverage>=7.6,<8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dip"]

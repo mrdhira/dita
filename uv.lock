@@ -1,10 +1,12 @@
 version = 1
 revision = 3
-requires-python = ">=3.14"
+requires-python = ">=3.14.6"
 
 [manifest]
 members = [
+    "dip",
     "inferences-ocr",
+    "worker",
 ]
 
 [[package]]
@@ -205,6 +207,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/00/ac9da1a60a4e84c3ad0f7db4723fd327154a8f9add210c0dcd2db3ec5156/coverage-7.16.0-cp315-cp315t-win_arm64.whl", hash = "sha256:2ddaa9e2af4760a329d80008b7a3b4762fbb0dbcb169199360f9a5179c32f2dc", size = 225872, upload-time = "2026-08-28T21:54:32.806Z" },
     { url = "https://files.pythonhosted.org/packages/b1/5a/234e8fadf85c3cc48cb31c247b9e8e0c7f06ece80f5b29f9b8c241f9da4c/coverage-7.16.0-py3-none-any.whl", hash = "sha256:245f7de6d023a5bba375dbec9f2e0869bfa26ac0cc639bbb7b4c814884000b73", size = 214977, upload-time = "2026-08-28T21:54:35.189Z" },
 ]
+
+[[package]]
+name = "dip"
+version = "0.1.0"
+source = { editable = "packages/pylibs/dip" }
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.6,<8" }]
 
 [[package]]
 name = "flatbuffers"
@@ -567,3 +584,26 @@ sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
 ]
+
+[[package]]
+name = "worker"
+version = "0.1.0"
+source = { editable = "packages/pylibs/worker" }
+dependencies = [
+    { name = "dip" },
+    { name = "pyyaml" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dip", editable = "packages/pylibs/dip" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.6,<8" }]

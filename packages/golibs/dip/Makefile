@@ -1,24 +1,12 @@
-# Tasks for this package only. Run from here, or via the root Makefile.
-
 PACKAGE := dip
 
-# A tripwire, not a target: a test that asserts nothing raises coverage just as well as a
-# test that asserts something. Set just below what the suite reaches.
-#
-# `go test -cover` prints a percentage and exits zero at any percentage, so unlike the
-# Python units there is no --fail-under to lean on and the floor is checked here.
+# `go test -cover` exits zero at any percentage, so there is no --fail-under to lean on and
+# the floor is enforced below. A tripwire, not a target: set just under what the suite reaches.
 COVERAGE_FLOOR := 78
 COVERAGE_OUT   := coverage.out
 
-# The conformance corpus is specs/dip/conformance at the repository root. It belongs to
-# neither implementation, so it lives outside this module and a checkout of this module
-# alone may not have it; the corpus cases skip when it is missing.
-#
-# That skip is reported here because `go test` will not report it: without -v the tool
-# prints nothing for a package whose tests skip -- not even output written straight to
-# stderr, which it buffers and discards for a package that passes. The coverage floor is no
-# help either, since the package's own tests clear it with or without the corpus. So the
-# status is printed before every run, where it is impossible to miss.
+# `go test` without -v prints nothing for a package whose tests skip, and the floor clears
+# with or without the corpus, so an absent corpus would silently stop running its cases.
 CORPUS_DIR := $(or $(DIP_CONFORMANCE_CORPUS),$(CURDIR)/../../../specs/dip/conformance)
 
 .PHONY: help test coverage corpus

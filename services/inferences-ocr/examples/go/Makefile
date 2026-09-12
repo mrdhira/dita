@@ -1,12 +1,5 @@
-# The example is its own unit: it is code someone will copy, so it carries its own tests
-# and its own coverage number rather than hiding inside the service it demonstrates.
-
-# A tripwire, not a target, and set just below what the suite reaches. It is low because
-# most of this file is `run`, which only a live worker exercises; it exists so the helpers
-# below it cannot quietly lose their tests.
-#
-# `go test -cover` prints a percentage and exits zero at any percentage, so unlike the
-# Python units there is no --fail-under to lean on and the floor is checked here.
+# `go test -cover` exits zero at any percentage, so the floor is enforced below. Low because
+# most of main.go is `run`, which only a live worker exercises.
 COVERAGE_FLOOR := 14
 COVERAGE_OUT   := coverage.out
 

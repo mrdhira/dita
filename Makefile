@@ -40,6 +40,12 @@ SCHEMA  := specs/dip/dip.schema.json
 PY_CODEGEN := datamodel-code-generator==0.40.0
 GO_CODEGEN := github.com/atombender/go-jsonschema@v0.20.0
 
+# go-jsonschema restates every field name and repeats one UnmarshalJSON banner per type.
+# Stripped during generation so a regeneration cannot bring it back; the IDL's own
+# descriptions survive, because those say something the field name does not.
+GO_GEN_NOISE := -e '/^[[:space:]]*\/\/ [A-Za-z0-9_]+ corresponds to the JSON schema field "[^"]*"\.$$/d' \
+                -e '/^[[:space:]]*\/\/ UnmarshalJSON implements json\.Unmarshaler\.$$/d'
+
 .PHONY: help units doctor test coverage build lock lock-check lock-upgrade \
         py-test py-coverage py-verify go-test go-coverage go-verify go-work-sync \
         dip-verify dip-generate dip-corpus py-generate go-generate
@@ -184,6 +190,8 @@ go-generate:
 	@test -f $(SCHEMA) || { echo "$@: $(SCHEMA) is not on this branch"; exit 1; }
 	GOWORK=off GOFLAGS=-mod=mod go run $(GO_CODEGEN) \
 		--package dip --tags json --output packages/golibs/dip/types.go $(SCHEMA)
+	@tmp=$$(mktemp) && sed -E $(GO_GEN_NOISE) packages/golibs/dip/types.go > $$tmp \
+		&& mv $$tmp packages/golibs/dip/types.go
 	gofmt -w packages/golibs/dip/types.go
 
 dip-corpus:

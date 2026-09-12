@@ -7,14 +7,12 @@ import "fmt"
 import "reflect"
 
 type ErrorBody struct {
-	// Code corresponds to the JSON schema field "code".
 	Code ErrorCode `json:"code"`
 
 	// Prose for humans and logs. Not a contract.
 	Message string `json:"message"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ErrorBody) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -61,7 +59,6 @@ var enumValues_ErrorCode = []interface{}{
 	"internal",
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ErrorCode) UnmarshalJSON(value []byte) error {
 	var v string
 	if err := json.Unmarshal(value, &v); err != nil {
@@ -82,14 +79,11 @@ func (j *ErrorCode) UnmarshalJSON(value []byte) error {
 }
 
 type ErrorResponse struct {
-	// Error corresponds to the JSON schema field "error".
 	Error ErrorBody `json:"error"`
 
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ErrorResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -111,7 +105,6 @@ func (j *ErrorResponse) UnmarshalJSON(value []byte) error {
 }
 
 type HandshakeRequest struct {
-	// Op corresponds to the JSON schema field "op".
 	Op HandshakeRequestOp `json:"op"`
 }
 
@@ -125,7 +118,6 @@ var enumValues_HandshakeRequestOp = []interface{}{
 	"version",
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *HandshakeRequestOp) UnmarshalJSON(value []byte) error {
 	var v string
 	if err := json.Unmarshal(value, &v); err != nil {
@@ -145,7 +137,6 @@ func (j *HandshakeRequestOp) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *HandshakeRequest) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -164,38 +155,30 @@ func (j *HandshakeRequest) UnmarshalJSON(value []byte) error {
 }
 
 type HandshakeResponse struct {
-	// DefaultModel corresponds to the JSON schema field "default_model".
 	DefaultModel string `json:"default_model"`
 
-	// Engines corresponds to the JSON schema field "engines".
 	Engines []string `json:"engines"`
 
-	// Limits corresponds to the JSON schema field "limits".
 	Limits Limits `json:"limits"`
 
 	// Model being fetched, if any.
 	Loading *string `json:"loading,omitempty"`
 
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
-	// Ops corresponds to the JSON schema field "ops".
 	Ops []string `json:"ops"`
 
 	// Wire version the peer speaks.
 	Protocol int `json:"protocol"`
 
-	// Resident corresponds to the JSON schema field "resident".
 	Resident interface{} `json:"resident,omitempty"`
 
-	// Service corresponds to the JSON schema field "service".
 	Service string `json:"service"`
 
 	// Implementation version, not the wire version.
 	Version string `json:"version"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *HandshakeResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -237,11 +220,9 @@ func (j *HandshakeResponse) UnmarshalJSON(value []byte) error {
 // Takes no model field. Load first, unload after, so which model answered is never
 // in doubt. The image rides in the payload, not here.
 type InferRequest struct {
-	// Op corresponds to the JSON schema field "op".
 	Op string `json:"op"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *InferRequest) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -260,23 +241,19 @@ func (j *InferRequest) UnmarshalJSON(value []byte) error {
 }
 
 type InferResponse struct {
-	// InferMs corresponds to the JSON schema field "infer_ms".
 	InferMs float64 `json:"infer_ms"`
 
-	// Lines corresponds to the JSON schema field "lines".
 	Lines []Line `json:"lines"`
 
 	// Which model actually answered.
 	Model string `json:"model"`
 
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
 	// The lines joined with newlines.
 	Text string `json:"text"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *InferResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -325,7 +302,6 @@ type Limits struct {
 	MessageTimeoutS int `json:"message_timeout_s"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *Limits) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -363,11 +339,9 @@ type Line struct {
 	// 0..1, or null when the engine does not report one.
 	Confidence *float64 `json:"confidence"`
 
-	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *Line) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -398,11 +372,9 @@ func (j *Line) UnmarshalJSON(value []byte) error {
 }
 
 type ListRequest struct {
-	// Op corresponds to the JSON schema field "op".
 	Op string `json:"op"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ListRequest) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -421,23 +393,17 @@ func (j *ListRequest) UnmarshalJSON(value []byte) error {
 }
 
 type ListResponse struct {
-	// DefaultModel corresponds to the JSON schema field "default_model".
 	DefaultModel string `json:"default_model"`
 
-	// Loading corresponds to the JSON schema field "loading".
 	Loading *string `json:"loading,omitempty"`
 
-	// Models corresponds to the JSON schema field "models".
 	Models []ModelSummary `json:"models"`
 
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
-	// Resident corresponds to the JSON schema field "resident".
 	Resident interface{} `json:"resident,omitempty"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ListResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -464,17 +430,13 @@ func (j *ListResponse) UnmarshalJSON(value []byte) error {
 // id is canonical; model is accepted as an alias and is the only op where that
 // field is meaningful.
 type LoadRequest struct {
-	// Id corresponds to the JSON schema field "id".
 	Id *string `json:"id,omitempty"`
 
-	// Model corresponds to the JSON schema field "model".
 	Model *string `json:"model,omitempty"`
 
-	// Op corresponds to the JSON schema field "op".
 	Op string `json:"op"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *LoadRequest) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -493,26 +455,20 @@ func (j *LoadRequest) UnmarshalJSON(value []byte) error {
 }
 
 type LoadResponse struct {
-	// AlreadyResident corresponds to the JSON schema field "already_resident".
 	AlreadyResident bool `json:"already_resident"`
 
-	// Engine corresponds to the JSON schema field "engine".
 	Engine string `json:"engine"`
 
-	// Id corresponds to the JSON schema field "id".
 	Id string `json:"id"`
 
-	// LoadMs corresponds to the JSON schema field "load_ms".
 	LoadMs float64 `json:"load_ms"`
 
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
 	// What this load evicted. Always present.
 	Unloaded *string `json:"unloaded"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *LoadResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -546,28 +502,20 @@ func (j *LoadResponse) UnmarshalJSON(value []byte) error {
 }
 
 type ModelSummary struct {
-	// Bytes corresponds to the JSON schema field "bytes".
 	Bytes int `json:"bytes"`
 
-	// Description corresponds to the JSON schema field "description".
 	Description string `json:"description"`
 
-	// Engine corresponds to the JSON schema field "engine".
 	Engine string `json:"engine"`
 
-	// Files corresponds to the JSON schema field "files".
 	Files int `json:"files"`
 
-	// Id corresponds to the JSON schema field "id".
 	Id string `json:"id"`
 
-	// Langs corresponds to the JSON schema field "langs".
 	Langs []string `json:"langs"`
 
-	// SourceType corresponds to the JSON schema field "source_type".
 	SourceType ModelSummarySourceType `json:"source_type"`
 
-	// UnverifiedFiles corresponds to the JSON schema field "unverified_files".
 	UnverifiedFiles []string `json:"unverified_files"`
 }
 
@@ -581,7 +529,6 @@ var enumValues_ModelSummarySourceType = []interface{}{
 	"system",
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ModelSummarySourceType) UnmarshalJSON(value []byte) error {
 	var v string
 	if err := json.Unmarshal(value, &v); err != nil {
@@ -601,7 +548,6 @@ func (j *ModelSummarySourceType) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ModelSummary) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -644,7 +590,6 @@ func (j *ModelSummary) UnmarshalJSON(value []byte) error {
 type Point []float64
 
 type ProbeRequest struct {
-	// Op corresponds to the JSON schema field "op".
 	Op ProbeRequestOp `json:"op"`
 }
 
@@ -660,7 +605,6 @@ var enumValues_ProbeRequestOp = []interface{}{
 	"startupz",
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ProbeRequestOp) UnmarshalJSON(value []byte) error {
 	var v string
 	if err := json.Unmarshal(value, &v); err != nil {
@@ -680,7 +624,6 @@ func (j *ProbeRequestOp) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ProbeRequest) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -700,25 +643,18 @@ func (j *ProbeRequest) UnmarshalJSON(value []byte) error {
 
 // resident and loading are present on readyz only.
 type ProbeResponse struct {
-	// Loading corresponds to the JSON schema field "loading".
 	Loading *string `json:"loading,omitempty"`
 
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
-	// Probe corresponds to the JSON schema field "probe".
 	Probe ProbeResponseProbe `json:"probe"`
 
-	// Reasons corresponds to the JSON schema field "reasons".
 	Reasons []string `json:"reasons"`
 
-	// Resident corresponds to the JSON schema field "resident".
 	Resident interface{} `json:"resident,omitempty"`
 
-	// Status corresponds to the JSON schema field "status".
 	Status ProbeResponseStatus `json:"status"`
 
-	// UptimeS corresponds to the JSON schema field "uptime_s".
 	UptimeS float64 `json:"uptime_s"`
 }
 
@@ -734,7 +670,6 @@ var enumValues_ProbeResponseProbe = []interface{}{
 	"startupz",
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ProbeResponseProbe) UnmarshalJSON(value []byte) error {
 	var v string
 	if err := json.Unmarshal(value, &v); err != nil {
@@ -764,7 +699,6 @@ var enumValues_ProbeResponseStatus = []interface{}{
 	"fail",
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ProbeResponseStatus) UnmarshalJSON(value []byte) error {
 	var v string
 	if err := json.Unmarshal(value, &v); err != nil {
@@ -784,7 +718,6 @@ func (j *ProbeResponseStatus) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *ProbeResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -827,7 +760,6 @@ type Prologue struct {
 	Protocol *int `json:"protocol,omitempty"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *Prologue) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -856,20 +788,15 @@ func (j *Prologue) UnmarshalJSON(value []byte) error {
 
 // The model that can answer infer right now. Null when nothing is loaded.
 type Resident struct {
-	// Engine corresponds to the JSON schema field "engine".
 	Engine string `json:"engine"`
 
-	// Id corresponds to the JSON schema field "id".
 	Id string `json:"id"`
 
-	// Langs corresponds to the JSON schema field "langs".
 	Langs []string `json:"langs"`
 
-	// ResidentSeconds corresponds to the JSON schema field "resident_seconds".
 	ResidentSeconds float64 `json:"resident_seconds"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *Resident) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -897,11 +824,9 @@ func (j *Resident) UnmarshalJSON(value []byte) error {
 }
 
 type UnloadRequest struct {
-	// Op corresponds to the JSON schema field "op".
 	Op string `json:"op"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *UnloadRequest) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
@@ -920,14 +845,11 @@ func (j *UnloadRequest) UnmarshalJSON(value []byte) error {
 }
 
 type UnloadResponse struct {
-	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
-	// Unloaded corresponds to the JSON schema field "unloaded".
 	Unloaded *string `json:"unloaded"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
 func (j *UnloadResponse) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {

@@ -1,12 +1,6 @@
-// Command ocrclient is the reference Go client for the inferences-ocr worker.
-//
-// It is the shape the orchestrator's client will take: dial the unix socket, handshake,
-// list what is selectable, load one model, run an image through it, unload. The framing
-// used to live in this file; it lives in packages/golibs/dip now, so that this example and
-// the orchestrator share one implementation rather than two that drift. That package is
-// standard library only and has no module requires, which is why this one has exactly one.
-//
-// The interesting part is no longer here. Read packages/golibs/dip/framing.go.
+// Command ocrclient is the reference Go client for the inferences-ocr worker: dial,
+// handshake, list, load, infer, unload. The framing lives in packages/golibs/dip, so this
+// example and the orchestrator share one implementation rather than two that drift.
 package main
 
 import (
@@ -22,8 +16,7 @@ import (
 	"github.com/mrdhira/dita/packages/golibs/dip"
 )
 
-// callTimeout bounds every op. A cold load downloads and verifies hundreds of megabytes,
-// so it is generous; the orchestrator will want per-op budgets rather than one number.
+// callTimeout bounds every op; a cold load downloads and verifies hundreds of megabytes.
 const callTimeout = 5 * time.Minute
 
 func main() {
@@ -56,7 +49,6 @@ func run(socket, model, image string) error {
 	}
 	defer client.Close()
 
-	// 1. handshake — confirm the protocol and learn the limits.
 	hello, err := client.Handshake(ctx)
 	if err != nil {
 		return err
@@ -66,7 +58,6 @@ func run(socket, model, image string) error {
 	fmt.Printf("           max_chunk=%d max_control=%d max_payload=%d\n",
 		hello.Limits.MaxChunk, hello.Limits.MaxControl, hello.Limits.MaxPayload)
 
-	// 2. list — what is selectable.
 	listed, err := client.List(ctx)
 	if err != nil {
 		return err
@@ -80,7 +71,6 @@ func run(socket, model, image string) error {
 		model = listed.DefaultModel
 	}
 
-	// 3. load — the orchestrator decides what is resident; the worker never guesses.
 	loaded, err := client.Load(ctx, model)
 	if err != nil {
 		return err
@@ -88,7 +78,6 @@ func run(socket, model, image string) error {
 	fmt.Printf("load       %s (%s) in %.0fms, evicted %s\n",
 		loaded.Id, loaded.Engine, loaded.LoadMs, orNone(loaded.Unloaded))
 
-	// 4. infer — the image rides in the payload, not in the control block.
 	result, err := client.Infer(ctx, pixels)
 	if err != nil {
 		return err
@@ -104,7 +93,6 @@ func run(socket, model, image string) error {
 	}
 	fmt.Printf("text       %s\n", strings.ReplaceAll(result.Text, "\n", "\n           "))
 
-	// 5. unload — give the memory back.
 	if _, err := client.Unload(ctx); err != nil {
 		return err
 	}

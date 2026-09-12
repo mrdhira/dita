@@ -372,7 +372,7 @@ them from the values it already receives.
 
 ## Testing
 
-**Unit, stdlib only, no network and no weights** (44 tests, `make test`):
+**Unit, stdlib only, no network and no weights** (54 tests, `make test`):
 
 - *Framing* — a control block four times larger than `SO_SNDBUF`, a peer that announces a
   payload then sends fewer datagrams, a peer that closes mid-message, an oversized datagram
@@ -381,7 +381,10 @@ them from the values it already receives.
   peer receiving `timeout` rather than a reset, the 17th connection receiving `busy`, and the
   three probe ops answering on the real transport.
 - *Health* — each probe's failure conditions in isolation, including that a cold load in
-  flight does **not** trip readiness and that a failed load does, then recovers.
+  flight does **not** trip readiness and that a failed load does, then recovers. Separately,
+  the exact line `--probe` prints for a pass and for a fail, asserted as a string: the exit
+  code was always correct, which is how a doubled verdict (`readyz: pass pass`) survived a
+  review.
 - *The registry* — parsing, id validation against traversal, and that every downloadable file
   carries a digest.
 - *The fetcher* — a bad digest, a corrupt cache, an oversized download, a hostile

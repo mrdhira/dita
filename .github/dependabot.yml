@@ -1,0 +1,41 @@
+# Dependabot watches the manifests; the weekly deps-check workflow watches the resolved
+# environment. They answer different questions and neither replaces the other.
+#
+#   Dependabot        reads services/inferences-ocr/requirements.txt and opens a PR when a
+#                     direct dependency has a newer release that our bounds allow. It can
+#                     only move what we declare.
+#   deps-check        installs the requirements and runs `uv pip list --outdated` over the
+#                     whole resolved tree, then opens or updates one issue. It sees
+#                     transitive packages too -- which is how antlr4-python3-runtime
+#                     surfaced: omegaconf pins it exactly, rapidocr pulls in omegaconf, and
+#                     nothing in our requirements.txt can move it. That is an upstream
+#                     report, not a PR we can merge, so an issue is the right shape for it.
+#
+# In short: a Dependabot PR is something to review and merge; a deps-check issue is
+# something to read and usually to wait on.
+
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /services/inferences-ocr
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    # One PR for the set, not one per package: rapidocr, onnxruntime, numpy and opencv are
+    # a coupled stack, and bumping them separately means testing combinations that will
+    # never ship together.
+    groups:
+      inferences-ocr:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    labels:
+      - dependencies
+      - python
+      - inferences-ocr

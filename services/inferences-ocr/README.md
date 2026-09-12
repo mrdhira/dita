@@ -293,12 +293,21 @@ cd services/inferences-ocr && python -m unittest discover -s tests -t .  # or: m
 make deps-check      # uv pip list --outdated against the service venv
 ```
 
-44 tests covering the framing (a control block four times larger than `SO_SNDBUF`, a peer
+Two things watch the dependencies, and they answer different questions. **Dependabot**
+(`.github/dependabot.yml`) reads `requirements.txt` and opens one grouped PR a week when a
+direct dependency has a newer release — something to review and merge. The **weekly
+`deps-check` workflow** installs the requirements and inspects the whole resolved tree, then
+opens or updates a single issue. It is the one that sees transitive packages: it is how
+`antlr4-python3-runtime` surfaced, pinned exactly by omegaconf, which rapidocr pulls in, so
+nothing in our `requirements.txt` can move it. That is an upstream report to wait on, not a
+PR to merge.
+
+54 tests covering the framing (a control block four times larger than `SO_SNDBUF`, a peer
 that announces a payload then stalls, a peer that closes mid-message, oversized datagrams),
-the real server over a real socket, the health probes, the registry parser and its id
-validation, the fetcher's refusal of bad, oversized or unpinned files, the full `dispatch`
-surface, and the one-model invariant sampled from inside the critical section under
-concurrent loads, a failed fetch, and a download in flight.
+the real server over a real socket, the health probes and the exact line `--probe` prints,
+the registry parser and its id validation, the fetcher's refusal of bad, oversized or
+unpinned files, the full `dispatch` surface, and the one-model invariant sampled from inside
+the critical section under concurrent loads, a failed fetch, and a download in flight.
 
 There is no linter configured yet; `.claude/rules/PYTHON-CODE-GUIDELINES.md` is still empty,
 so house style here is "match the file you are in".

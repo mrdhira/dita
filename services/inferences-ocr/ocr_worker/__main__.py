@@ -9,6 +9,7 @@ import signal
 import socket
 import sys
 from pathlib import Path
+from typing import Any, Dict
 
 from . import __version__, protocol
 from .manager import ModelManager
@@ -85,9 +86,31 @@ def run_probe(socket_path: Path, probe: str) -> int:
         return 1
 
     passed = bool(response.get("ok"))
-    detail = "; ".join(response.get("reasons") or []) or response.get("status", "")
-    print(f"{op}: {'pass' if passed else 'fail'} {detail}".rstrip())
+    print(probe_line(op, response))
     return 0 if passed else 1
+
+
+def probe_line(op: str, response: Dict[str, Any]) -> str:
+    """One line: the verdict, then something worth reading.
+
+    The verdict appears once. It used to appear twice, because the detail fell back to
+    `response["status"]`, which is the same word -- hence `readyz: pass pass`. The exit
+    code was right either way, which is why nobody noticed; the test asserts this string.
+    """
+    if not response.get("ok"):
+        return f"{op}: fail {'; '.join(response.get('reasons') or []) or 'no reason given'}"
+
+    fields = []
+    if "resident" in response:
+        resident = response["resident"]
+        fields.append(f"resident={resident['id'] if resident else 'none'}")
+    if response.get("loading"):
+        fields.append(f"loading={response['loading']}")
+    uptime = response.get("uptime_s")
+    if isinstance(uptime, (int, float)):
+        fields.append(f"uptime={uptime:.1f}s")
+
+    return f"{op}: pass {' '.join(fields)}".rstrip()
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -6,6 +6,7 @@ registry parser, the fetcher's checksum refusal, and the one-model-resident inva
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -19,6 +20,7 @@ from typing import Any, Dict
 from unittest import mock
 
 from ocr_worker import fetcher, protocol
+from ocr_worker.__main__ import probe_line, run_probe
 from ocr_worker.engines import Engine, Line, Result
 from ocr_worker.fetcher import ChecksumError, FetchError, ensure_model
 from ocr_worker.manager import ModelManager, NoModelLoaded
@@ -746,6 +748,153 @@ class SocketServerTest(unittest.TestCase):
         response, _payload = protocol.recv_message(extra)
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "busy")
+
+
+class ProbeLineTest(unittest.TestCase):
+    """The exact string `--probe` prints.
+
+    This exists because the verdict used to be printed twice -- `readyz: pass pass` -- and
+    the exit code was correct the whole time, so nothing caught it. These assert the line,
+    byte for byte.
+    """
+
+    def test_a_passing_readyz_names_the_resident_model_and_the_uptime(self) -> None:
+        line = probe_line(
+            "readyz",
+            {
+                "ok": True,
+                "probe": "readyz",
+                "status": "pass",
+                "uptime_s": 12.345,
+                "reasons": [],
+                "resident": {"id": "rapidocr-ppocrv5", "engine": "rapidocr"},
+                "loading": None,
+            },
+        )
+        self.assertEqual(line, "readyz: pass resident=rapidocr-ppocrv5 uptime=12.3s")
+
+    def test_a_passing_readyz_with_nothing_loaded_says_so(self) -> None:
+        line = probe_line(
+            "readyz",
+            {"ok": True, "status": "pass", "uptime_s": 2.0, "reasons": [], "resident": None, "loading": None},
+        )
+        self.assertEqual(line, "readyz: pass resident=none uptime=2.0s")
+
+    def test_a_passing_readyz_during_a_load_names_the_incoming_model(self) -> None:
+        line = probe_line(
+            "readyz",
+            {"ok": True, "status": "pass", "uptime_s": 5.06, "reasons": [], "resident": None, "loading": "manga-ocr"},
+        )
+        self.assertEqual(line, "readyz: pass resident=none loading=manga-ocr uptime=5.1s")
+
+    def test_livez_and_startupz_carry_no_resident_field(self) -> None:
+        for op in ("livez", "startupz"):
+            line = probe_line(op, {"ok": True, "status": "pass", "uptime_s": 41.24, "reasons": []})
+            self.assertEqual(line, f"{op}: pass uptime=41.2s")
+
+    def test_a_failing_probe_prints_the_reasons(self) -> None:
+        line = probe_line(
+            "readyz",
+            {
+                "ok": False,
+                "status": "fail",
+                "uptime_s": 0.5,
+                "reasons": ["the models directory /models is not writable"],
+                "resident": None,
+                "loading": None,
+            },
+        )
+        self.assertEqual(line, "readyz: fail the models directory /models is not writable")
+
+    def test_several_reasons_are_joined(self) -> None:
+        line = probe_line(
+            "readyz", {"ok": False, "status": "fail", "uptime_s": 0.5, "reasons": ["first thing", "second thing"]}
+        )
+        self.assertEqual(line, "readyz: fail first thing; second thing")
+
+    def test_a_failure_with_no_reasons_still_says_something(self) -> None:
+        self.assertEqual(
+            probe_line("livez", {"ok": False, "status": "fail", "reasons": []}),
+            "livez: fail no reason given",
+        )
+
+    def test_the_verdict_is_never_printed_twice(self) -> None:
+        """The actual regression. `status` is the same word as the verdict."""
+        responses = [
+            {"ok": True, "status": "pass", "uptime_s": 1.0, "reasons": []},
+            {"ok": True, "status": "pass", "uptime_s": 1.0, "reasons": [], "resident": None, "loading": None},
+            {"ok": False, "status": "fail", "uptime_s": 1.0, "reasons": ["because"]},
+        ]
+        for response in responses:
+            line = probe_line("readyz", response)
+            self.assertNotIn("pass pass", line)
+            self.assertNotIn("fail fail", line)
+            verdict = "pass" if response["ok"] else "fail"
+            self.assertEqual(line.split().count(verdict), 1, line)
+
+
+class ProbeCLITest(unittest.TestCase):
+    """`--probe` end to end: a real socket, a real server, the real printed line."""
+
+    def start_worker(self, models_dir: Path) -> Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "ocr.sock"
+
+        manager = ModelManager(load_registry(REGISTRY_PATH), models_dir)
+        server = SocketServer(manager, path, idle_timeout=10.0, message_timeout=5.0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if path.exists():
+                break
+            time.sleep(0.05)
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.stop)
+        return path
+
+    def probe(self, path: Path, name: str) -> tuple:
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            code = run_probe(path, name)
+        return code, captured.getvalue().strip()
+
+    def test_a_passing_probe_prints_one_verdict_and_exits_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as models:
+            path = self.start_worker(Path(models))
+
+            code, line = self.probe(path, "ready")
+            self.assertEqual(code, 0)
+            self.assertNotIn("pass pass", line)
+            self.assertRegex(line, r"^readyz: pass resident=none uptime=\d+\.\d+s$")
+
+            code, line = self.probe(path, "live")
+            self.assertEqual(code, 0)
+            self.assertRegex(line, r"^livez: pass uptime=\d+\.\d+s$")
+
+            code, line = self.probe(path, "startup")
+            self.assertEqual(code, 0)
+            self.assertRegex(line, r"^startupz: pass uptime=\d+\.\d+s$")
+
+    def test_a_failing_probe_prints_the_reason_and_exits_one(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            models = Path(parent) / "readonly"
+            models.mkdir()
+            models.chmod(0o500)
+            try:
+                path = self.start_worker(models)
+                code, line = self.probe(path, "ready")
+
+                self.assertEqual(code, 1)
+                self.assertEqual(line, f"readyz: fail the models directory {models} is not writable")
+
+                # Liveness is deliberately indifferent to a broken dependency.
+                code, line = self.probe(path, "live")
+                self.assertEqual(code, 0)
+                self.assertRegex(line, r"^livez: pass uptime=\d+\.\d+s$")
+            finally:
+                # Restore before the TemporaryDirectory tries to remove it.
+                models.chmod(0o700)
 
 
 if __name__ == "__main__":

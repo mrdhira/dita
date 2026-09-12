@@ -93,7 +93,19 @@ Useful flags: `--preload <model id>`, `--log-level debug`, `--registry` for a di
 
 ### From Python
 
-There is no HTTP debug mode. This is the whole client:
+The protocol is a package: [`packages/pylibs/dip`](../../packages/pylibs/dip), stdlib only,
+and this worker speaks it through the same code a caller does.
+
+```python
+import dip
+
+with dip.Requester.connect("../../run/inferences-ocr.sock") as worker:
+    print(worker.list_models()["models"])
+    worker.load("rapidocr-ppocrv5")
+    print(worker.infer(open("page.png", "rb").read())["text"])
+```
+
+There is no HTTP debug mode. Without the package, this is the whole client:
 
 ```python
 import json, socket
@@ -128,6 +140,12 @@ A complete, stdlib-only reference client lives in
 orchestrator will follow.
 
 ### The wire protocol
+
+DIP, version 2. The IDL is [`specs/dip/dip.schema.json`](../../specs/dip/dip.schema.json),
+the prose is [`docs/protocol/[1]dip-specification.md`](../../docs/protocol/%5B1%5Ddip-specification.md),
+and the implementation this worker uses is
+[`packages/pylibs/dip`](../../packages/pylibs/dip) — the framing below is that package, not
+a copy of it. What follows is the part a caller of *this* service needs.
 
 **Transport:** `AF_UNIX` / `SOCK_SEQPACKET` at `$SOCKET_PATH`, mode `0660`. Protocol 2.
 
@@ -328,7 +346,7 @@ without running `make lock` and the image build fails. Note that `--frozen` is *
 flag for this — it refuses to update the lock but does not check it, and will export a stale
 one and exit 0.
 
-66 tests at two levels, described in full in the
+67 tests at two levels, described in full in the
 [technical requirement](../../docs/inferences/ocr/%5B1%5Dtechnical-requirement.md#testing).
 
 **Tables** (`subTest`, one row per case) for everything pure: the Tesseract TSV fold and the
@@ -348,8 +366,8 @@ Not covered on purpose: the three engine constructors, which open real ONNX sess
 need weights on disk; anything requiring the network; and model accuracy, which is a
 property of the weights and is checked by the end-to-end run instead.
 
-There is no linter configured yet; `.claude/rules/PYTHON-CODE-GUIDELINES.md` is still empty,
-so house style here is "match the file you are in".
+There is no linter configured yet. House style is in
+[`.claude/rules/PYTHON-CODE-GUIDELINES.md`](../../.claude/rules/PYTHON-CODE-GUIDELINES.md).
 
 ### Adding a model
 

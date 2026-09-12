@@ -7,8 +7,12 @@
   only and will stay that way — the framing is forty lines.
 - **CGO-free.** `CGO_ENABLED=0` everywhere. A static binary is why the orchestrator image can
   be `FROM scratch`.
-- **Pin the toolchain.** Every `go.mod` and `go.work` carries both `go` and `toolchain`
-  directives at the exact version in `.tool-versions`.
+- **Pin the toolchain.** Every `go.mod` carries `go` at the exact version in
+  `.tool-versions`; `go.work` carries that plus a matching `toolchain` directive. Do **not**
+  add a `toolchain` line to a `go.mod` that already names the same version: Go treats it as
+  redundant, `go build` fails with "updates to go.mod needed" and `go mod tidy` deletes it.
+  A `go` directive at the full patch is the pin. `toolchain` in a `go.mod` is only meaningful
+  when it names a version newer than the `go` line.
 - `go.sum` and `go.work.sum` are committed even while empty. An empty lockfile is not a lock;
   it is the file that will hold one the day a dependency arrives.
 

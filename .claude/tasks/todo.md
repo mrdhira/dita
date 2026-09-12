@@ -23,9 +23,14 @@ implementations that agree today.
 
 ## Order B — the DIP protocol + codegen
 
-- [ ] B1. Specify the protocol in one place, language-neutral.
-- [ ] B2. Generate the Python and Go bindings from it.
-- [ ] B3. Both implementations point at the spec; neither is the source of truth.
+- [x] B1. Specify the protocol in one place, language-neutral: `specs/dip/dip.schema.json`
+      plus `docs/protocol/[1]dip-specification.md`, with the alternatives that lost.
+- [x] B2. Conformance corpus both languages read: 21 framing cases, 16 dispatch cases.
+- [x] B3. Generate the Python and Go types from the IDL, zero third-party dependencies.
+- [x] B4. `packages/pylibs/dip` — both roles; `services/inferences-ocr` imports it.
+- [x] B5. `packages/golibs/dip` — requester implemented, receiver designed; the Go example
+      uses it.
+- [x] B6. Per-unit Makefiles and coverage for packages and examples, both languages.
 
 ## Order C — worker kit refactor + metrics
 
@@ -44,6 +49,17 @@ implementations that agree today.
 ## Review section
 
 _(filled in at the end of each order: what changed, evidence, anything flagged)_
+
+### Order B
+
+Done. DIP specified, generated for both languages with zero third-party dependencies,
+implemented as `packages/{golibs,pylibs}/dip`, and both the service and the example rewired
+to it. Four units now, each with its own coverage number.
+
+The live cross-language run is what earned its keep: every suite was green while the
+generated Go validator refused every real inference response, because `go-jsonschema`
+applied `box`'s outer `minItems` to its inner point arrays. A named `Point` fixes it, and
+`responses.json` is the corpus layer that now guards it.
 
 ### Order A
 

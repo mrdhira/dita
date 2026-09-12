@@ -234,3 +234,9 @@ runtime image; the image build exports with `--no-default-groups`, which is load
 What is generated is *types*. The framing, the role implementations and the error taxonomy
 are hand-written library code in each package, because they are protocol behaviour rather
 than data shape. The conformance corpus is what keeps the two hand-written halves honest.
+
+**A note on `box`.** Its items are a named `Point` rather than an inline two-element array,
+and that is not cosmetic: with the inline form, `go-jsonschema` applied the outer `minItems`
+(4 corners) to the inner arrays (2 numbers) and generated a validator that rejected every
+real inference response. The named definition generates correctly. A schema is also an input
+to a code generator, and the generator's reading of it is part of the contract.

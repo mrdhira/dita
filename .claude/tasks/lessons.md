@@ -80,3 +80,15 @@ Each op declares the fields it accepts; anything else is a `bad_request`.
 **Why:** `infer` silently ignored a `model` field, so a caller naming a model got whatever
 happened to be resident — the wrong answer to a reasonable question. Silent tolerance hides
 typos and turns a client bug into a server behaviour.
+
+### Verify a generated validator against real data, not just the schema
+
+A schema is an input to a code generator, and the generator's reading of it is part of the
+contract. Decode a real captured response with the generated types before believing them.
+
+**Why:** `box` was specified as four `[x, y]` pairs with an inline inner array.
+`go-jsonschema` applied the outer `minItems` of 4 to the inner arrays of 2 and emitted a
+validator that rejected every real OCR response with `field box[0] length: must be >= 4`.
+The framing and dispatch corpora both passed, because neither decodes a response with the
+generated types. Only a live cross-language run caught it. A named `Point` definition
+generates correctly, and `responses.json` now guards it.

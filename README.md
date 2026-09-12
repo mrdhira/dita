@@ -33,10 +33,25 @@ tries to own the other's tree, and `packages/` itself is not a service.
 `go.work` takes no glob, so a new Go module is added with `make go-work-sync`
 (`go work use -r`), which expands it into the explicit list.
 
-**The one exception to language-first is the protocol spec.** It is a single
-language-neutral document with two generated implementations, so it cannot live under
-either language's directory without one implementation looking authoritative. It lives in
-`docs/`, and both `golibs` and `pylibs` point at it.
+**The one exception to language-first is the protocol.** DIP has a single
+language-neutral definition with two implementations, so it cannot live under either
+language's directory without one looking authoritative:
+
+```
+specs/dip/               the IDL (JSON Schema 2020-12) and the conformance corpus
+docs/protocol/           the prose specification
+packages/golibs/dip/     the Go implementation, types generated from the IDL
+packages/pylibs/dip/     the Python implementation, types generated from the IDL
+```
+
+See [the DIP specification](docs/protocol/%5B1%5Ddip-specification.md) for what the protocol
+is and why it is a new one rather than gRPC, Cap'n Proto, NDJSON or HTTP.
+
+**Generated code has zero third-party dependencies**, which is an acceptance criterion, not
+a preference. `make dip-verify` proves it both ways: `go list -deps` must report no
+module-path package, and an AST scan must find no import outside the standard library.
+`make dip-generate` regenerates both languages from the IDL; the output is committed. Both
+generators are dev-only tools and neither reaches a runtime image.
 
 ## Getting set up
 
@@ -130,10 +145,16 @@ under `packages/<name>/`; their design documents live under `docs/<area>/<name>/
 at the root accumulates service-specific detail.
 
 **Make is two layers.** The root [`Makefile`](Makefile) is repo-level only — `doctor`,
-`test`, `coverage`, `build`, `lock` — and delegates the rest to each service's own
-Makefile, which owns `test`, `coverage`, `run` and `image`. Coverage is reported per
-service, against that service's own code: one blended number would let a well-tested
-service hide an untested one.
+`test`, `coverage`, `build`, `lock`, and the DIP codegen targets — and delegates the rest to
+each unit's own Makefile, which owns `test`, `coverage` and whatever else that unit needs.
+
+A **unit** is anything with its own tests and its own coverage number: a service, a shared
+package, or an example. **Examples count as units.** They are code someone will copy, so
+they get the same treatment and their own number; folding them into the service they
+demonstrate would hide whether they are exercised at all.
+
+Coverage is reported per unit, against that unit's own code, in both languages. One blended
+number would let a well-tested unit hide an untested one.
 
 Working notes and plans live under `.claude/tasks/`; anything durable graduates to `docs/`.
 Agent guidance is in [`AGENTS.md`](AGENTS.md); the per-language rule files under

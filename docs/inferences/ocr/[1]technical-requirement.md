@@ -162,47 +162,21 @@ Three consequences, all deliberate:
 
 ### Interfaces
 
-**Transport.** `AF_UNIX` / `SOCK_SEQPACKET` at `$SOCKET_PATH`, mode `0660`, on a directory
-shared with the orchestrator. Protocol version 2.
+**The wire protocol is DIP**, specified in
+[`docs/protocol/[1]dip-specification.md`](../../protocol/%5B1%5Ddip-specification.md) with
+its IDL at [`specs/dip/dip.schema.json`](../../../specs/dip/dip.schema.json). This service is
+a DIP **receiver** and uses `packages/pylibs/dip` rather than carrying its own
+implementation. Everything the protocol specifies — the framing, the ops and their fields,
+the limits, the error codes, the health contract, the versioning rules — lives there and is
+deliberately not repeated here, so the two cannot drift.
 
-**Framing.** A message is a prologue datagram followed by two chunked sections:
+What is specific to this service:
 
-```
-datagram 0     : {"protocol": 2, "control_len": N, "payload_len": M}
-next datagrams : the control block, chunks of at most 65536 bytes
-next datagrams : the payload, chunks of at most 65536 bytes
-```
-
-Both sections are chunked because an AF_UNIX datagram cannot exceed `SO_SNDBUF` — 212992
-bytes by default — above which `send` fails with `EMSGSIZE` rather than fragmenting. This is
-not hypothetical for the control block: a dense page yields 900 detected lines and a 221 KB
-response. SEQPACKET's preserved boundaries are what let the chunks need no per-chunk header;
-a length of zero means that section sends no datagrams at all, and since no conforming
-datagram is empty, an empty read means the peer closed.
-
-**Ops.**
-
-| op | request | response |
-| --- | --- | --- |
-| `handshake` / `version` | — | `service`, `version`, `protocol`, `limits`, `engines[]`, `ops[]`, `default_model`, `resident`, `loading` |
-| `list` | — | `models[]`, `default_model`, `resident`, `loading` |
-| `load` | `id` | `id`, `engine`, `already_resident`, `load_ms`, `unloaded` |
-| `unload` | — | `unloaded` |
-| `infer` | payload = encoded image bytes, no fields | `text`, `lines[]`, `model`, `infer_ms` |
-| `livez` / `readyz` / `startupz` | — | `probe`, `status`, `uptime_s`, `reasons[]` (+ `resident`, `loading` on `readyz`) |
-
-Every response carries `ok`. A failure is `{"ok": false, "error": {"code", "message"}}`;
-`code` is the stable contract and `message` is for humans. Codes: `bad_request`,
-`unknown_model`, `unsupported_engine`, `checksum_mismatch`, `fetch_failed`,
-`no_model_loaded`, `timeout`, `busy`, `response_too_large`, `internal`.
-
-**Limits**, advertised in the handshake so nothing is hard-coded: `max_chunk` 65536,
-`max_control` 8 MiB, `max_payload` 64 MiB, `idle_timeout_s` 300, `message_timeout_s` 30, and
-a cap of 16 concurrent connections.
-
-**Unknown fields are refused, not ignored.** Each op declares the fields it accepts
-(`load` takes `id`, with `model` as an alias; everything else takes none) and anything else
-is a `bad_request`. `infer` with a `model` field gets a message pointing at `load`.
+- **Socket path** `$SOCKET_PATH`, mode `0660`, in a directory shared with the orchestrator.
+- **`infer` payload** is an encoded image: PNG, JPEG or anything Pillow decodes.
+- **`load` ids** come from this service's `models.yaml`, and `list` returns that registry.
+- **`engines`** in the handshake are this service's three adapters.
+- **Concurrency**: at most 16 connections, then `busy`.
 
 **Idempotency and retries.** `load` is idempotent — loading what is already resident returns
 `already_resident: true` and builds nothing. `unload` on an empty worker returns

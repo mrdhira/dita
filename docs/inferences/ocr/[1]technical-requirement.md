@@ -408,44 +408,75 @@ them from the values it already receives.
 
 ## Testing
 
-**Unit, stdlib only, no network and no weights** (54 tests, `make test`):
+Three levels, and they exist for different reasons. The shorthand is: the tables say the
+logic is right, the socket tests say the process is right, the end-to-end run says the
+model is right.
 
-- *Framing* — a control block four times larger than `SO_SNDBUF`, a peer that announces a
-  payload then sends fewer datagrams, a peer that closes mid-message, an oversized datagram
-  caught by `MSG_TRUNC`, announced lengths past the ceilings, and a non-object control block.
-- *The real server over a real socket* — the oversized response arriving intact, a stalled
-  peer receiving `timeout` rather than a reset, the 17th connection receiving `busy`, and the
-  three probe ops answering on the real transport.
-- *Health* — each probe's failure conditions in isolation, including that a cold load in
-  flight does **not** trip readiness and that a failed load does, then recovers. Separately,
-  the exact line `--probe` prints for a pass and for a fail, asserted as a string: the exit
-  code was always correct, which is how a doubled verdict (`readyz: pass pass`) survived a
-  review.
-- *The registry* — parsing, id validation against traversal, and that every downloadable file
-  carries a digest.
-- *The fetcher* — a bad digest, a corrupt cache, an oversized download, a hostile
-  `HF_ENDPOINT` scheme, and that a verified file is not re-hashed on the next load.
-- *The one-model invariant* — sampled from **inside** the critical section (live engines
-  counted during construction, which must always be zero), under 24 concurrent loads, under a
-  failed fetch, and while a download is in flight.
+**Level 1 — pure unit tables.** No sockets, no threads, no files, no network. Every one is
+a `subTest` table: one row per case, so a failure names the row and adding a case is one
+line. This is where the OCR logic lives, and it exists because for a while it did not: the
+three engine adapters sat at 0% coverage while the plumbing around them was tested hard, so
+a regression in TSV parsing or the decode loop would have passed the whole suite.
 
-**Integration, against a live worker** — the things a unit test cannot prove:
+| Table | What it pins |
+| --- | --- |
+| Tesseract TSV | Folding one-row-per-word output into lines: geometry, the union box, mean confidence, blank and negative-confidence rows dropped, malformed rows skipped, block and line grouping, Japanese joined without spaces. Plus one captured real page as an anchor. |
+| Tesseract shell-out | The argv we build, options reaching the command line, and every refusal: no binary, missing language data, `--list-langs` failing, a non-zero exit carrying its stderr. `subprocess.run` is the seam; no tesseract is installed or used. |
+| manga-ocr decode | The greedy loop, which is entirely ours: the EOS stop, the max-token stop, the whole prefix being re-fed each step, special and out-of-range tokens dropped, ellipsis normalisation, the encoder called once with a normalised NCHW batch, and confidence as the mean of per-token softmax maxima. A scripted fake decoder drives it. |
+| RapidOCR assembly | The library's parallel tuples into our line shape: order, newline joining, rounding of scores and boxes, nulls when the library omits boxes or scores, an empty result, and BGR channel order on the way in. |
+| Engine factory | Each name building its adapter, `ENGINE_NAMES` not drifting from what is buildable, and an unknown engine naming the ones that exist. |
+| Registry | Ten malformed manifests: id traversal, missing engine, unknown source type, unpinned revision, escaping `dest`, duplicate ids, a dangling `default_model`. |
+| Fetcher refusals | Every way fetched bytes can fail to be the pinned bytes, each ending with nothing left on disk. |
+| Probe lines | The exact string `--probe` prints, byte for byte, for pass and fail. |
 
-- The Go reference client running the full `handshake → list → load → infer → unload`
-  sequence and printing real recognised text, in both scripts.
-- A cold fetch into an empty models directory, with the resulting digests compared against
-  `models.yaml` byte for byte.
-- A corrupt cache with the source unreachable, which must fail rather than load bad bytes.
-- All three engines inside the container under the compose resource limits.
+**Level 2 — socket-level scenarios.** A real `SocketServer` on a real unix socket, with a
+stub manager in place of engines. These are deliberately **not** tables: a stalled peer, the
+connection cap, a cold load in flight, 24 concurrent loads and a failed fetch each need
+their own threads, fixtures and teardown, and each fails in its own way. Forcing them into a
+table would put a row of optional setup flags in the fixture and a pile of branches in the
+loop, and the loop would become the thing under test. The test file says so in a comment, so
+nobody "finishes the job" later.
 
-**The scenario most likely to catch the next real bug:** a dense page. It is the input that
-produced the one confirmed defect so far — a 221 KB control block that `send` refused — and
-it is the input where line count, response size, and the `max_candidates` ceiling all
-interact. Any change to the response shape should be re-run against it.
+They cover: a control block four times larger than `SO_SNDBUF` arriving intact, a peer that
+announces a payload and stalls, a peer that closes mid-message, an oversized datagram, the
+17th connection being refused, the probe ops over the real transport, and the one-model
+invariant sampled from *inside* the critical section.
 
-**What can only be checked in the real deployment:** the shared socket directory's ownership
-when the orchestrator and the worker are both running, and behaviour under sustained
-concurrent load from a real client rather than a test harness.
+**Level 3 — end-to-end, by hand.** Needs the model files and the network, so it is not in
+the suite: the Go reference client running `handshake → list → load → infer → unload`
+against a live worker and printing real recognised text; a cold fetch into an empty models
+directory with the digests compared against `models.yaml`; a corrupt cache with the source
+unreachable; all three engines inside the container under the compose limits.
+
+**Coverage.** `make coverage` runs the suite under `coverage` and enforces a floor. The
+number is a tripwire, not a target — a test that asserts nothing raises it exactly as well
+as a test that asserts something — so the table below is what matters, and the floor exists
+only so the engines cannot silently go dark again.
+
+**What is deliberately not covered, and why.**
+
+- **The three engine constructors.** `RapidOcrEngine.__init__` opens two ONNX sessions
+  through RapidOCR and `MangaOcrEngine.__init__` opens two more; both need real weights on
+  disk. Mocking them would assert that our mock was called, not that the model loads, so
+  they are left to the end-to-end run. This is most of the residual gap in those two files.
+- **Anything needing the network.** The fetcher's HTTP path is exercised with `urlopen`
+  patched; a real download is a level-3 check.
+- **Model accuracy.** Nothing in the suite asserts that PP-OCRv5 reads Japanese correctly —
+  that is a property of the weights, not of this code, and it is checked by the end-to-end
+  run against known images.
+- **`__main__`'s argument parsing and startup.** Covered by running the thing, not by unit
+  tests; the probe path inside it is unit-tested because it has a printed contract.
+
+**The scenario most likely to catch the next real bug** remains a dense page. It produced the
+one confirmed defect so far — a 221 KB control block that `send` refused — and it is where
+line count, response size and the detector's candidate ceiling all interact.
+
+**Mutation-checked.** The engine tables were validated by breaking the code they cover, one
+change at a time: shifting a TSV column, dropping the confidence filter, always space-joining,
+grouping by block instead of line, breaking the EOS stop, feeding only the last token,
+keeping special tokens, reading the first timestep instead of the last, dropping the rounding,
+dropping the BGR conversion, joining lines with a space, and mis-mapping an engine name. All
+twelve were caught, each by the specific row that should have caught it.
 
 ## Open questions
 

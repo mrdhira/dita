@@ -17,6 +17,13 @@ dependencies = [
     "opencv-python>=5.0,<6",
 ]
 
+# Dev-only. PEP 735 groups are never part of [project.dependencies], so they cannot
+# reach the runtime image: the Dockerfile exports with --no-default-groups.
+[dependency-groups]
+dev = [
+    "coverage>=7.6,<8",
+]
+
 [tool.setuptools]
 packages = ["ocr_worker", "ocr_worker.engines"]
 

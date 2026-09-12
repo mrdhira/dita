@@ -27,8 +27,10 @@ COPY services/inferences-ocr/pyproject.toml services/inferences-ocr/pyproject.to
 # against the manifests: `uv export --frozen` will happily export a stale lock and exit 0.
 # This line is the guard that replaces the old weekly deps-check workflow -- edit a bound in
 # a pyproject.toml without running `make lock` and the image build fails here.
-RUN uv export --package inferences-ocr --locked --no-emit-project --no-cache \
-        -o /tmp/requirements.txt
+# --no-default-groups keeps the dev group (coverage) out of the runtime image. Without
+# it uv exports the default groups too, and a test-only package would ship to production.
+RUN uv export --package inferences-ocr --locked --no-emit-project --no-default-groups \
+        --no-cache -o /tmp/requirements.txt
 
 FROM python:3.14-slim-trixie
 

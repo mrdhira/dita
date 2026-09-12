@@ -293,6 +293,7 @@ make build           # docker compose build, context = repo root
 
 # test — stdlib only, no network, no weights; uv syncs from the lock first
 make test
+make coverage        # the same suite under coverage, with a floor
 
 # dependencies
 make lock            # re-resolve uv.lock after editing a pyproject.toml
@@ -324,12 +325,25 @@ without running `make lock` and the image build fails. Note that `--frozen` is *
 flag for this — it refuses to update the lock but does not check it, and will export a stale
 one and exit 0.
 
-54 tests covering the framing (a control block four times larger than `SO_SNDBUF`, a peer
-that announces a payload then stalls, a peer that closes mid-message, oversized datagrams),
-the real server over a real socket, the health probes and the exact line `--probe` prints,
-the registry parser and its id validation, the fetcher's refusal of bad, oversized or
-unpinned files, the full `dispatch` surface, and the one-model invariant sampled from inside
-the critical section under concurrent loads, a failed fetch, and a download in flight.
+66 tests at two levels, described in full in the
+[technical requirement](../../docs/inferences/ocr/%5B1%5Dtechnical-requirement.md#testing).
+
+**Tables** (`subTest`, one row per case) for everything pure: the Tesseract TSV fold and the
+command we build for it, the manga-ocr decode loop, the RapidOCR result assembly, the engine
+factory, registry validation, fetcher refusals, and the exact line `--probe` prints. These
+are the OCR logic, and they were added because the three engine adapters had been at 0%
+coverage while the plumbing around them was tested hard.
+
+**Scenarios** (plain methods, deliberately not tables) for everything stateful: a stalled
+peer, the connection cap, a cold load in flight, concurrent loads, a failed fetch. Each
+needs its own threads and teardown and fails in its own way; a table would hide that.
+
+The engine tables were validated by mutation — twelve deliberate breakages of the code they
+cover, all twelve caught by the specific row that should catch them.
+
+Not covered on purpose: the three engine constructors, which open real ONNX sessions and
+need weights on disk; anything requiring the network; and model accuracy, which is a
+property of the weights and is checked by the end-to-end run instead.
 
 There is no linter configured yet; `.claude/rules/PYTHON-CODE-GUIDELINES.md` is still empty,
 so house style here is "match the file you are in".

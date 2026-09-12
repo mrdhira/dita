@@ -17,8 +17,8 @@ implementations that agree today.
 - [x] A1. `.claude/agents/` — three subagents, current format, one tack each, parallel-safe.
 - [x] A2. `.claude/rules/` — Python, Go and QA guidelines, concrete rather than aspirational.
 - [x] A3. `.claude/tasks/` — archive the OCR plan, fresh todo, seed `lessons.md`.
-- [ ] A4. `packages/` skeleton, language-first: `golibs/` and `pylibs/`, both toolchains wired.
-- [ ] A5. Exact version pins: Python 3.14.6 everywhere, Go `toolchain` directives, empty
+- [x] A4. `packages/` skeleton, language-first: `golibs/` and `pylibs/`, both toolchains wired.
+- [x] A5. Exact version pins: Python 3.14.6 everywhere, Go `toolchain` directives, empty
       `go.sum`/`go.work.sum`, `make doctor` asserting both, Dependabot docker + gomod entries.
 
 ## Order B — the DIP protocol + codegen
@@ -47,4 +47,11 @@ _(filled in at the end of each order: what changed, evidence, anything flagged)_
 
 ### Order A
 
-_(pending)_
+Done. Six 0-byte files filled (three agents, three rules), the OCR plan archived, nine
+lessons seeded, `packages/golibs` and `packages/pylibs` wired into both toolchains, and
+Python 3.14.6 / Go 1.27.1 pinned exactly with `make doctor` asserting both.
+
+One instruction could not be followed literally: a `toolchain` directive in every `go.mod`.
+Go rejects one equal to the `go` directive — `go build` fails and `go mod tidy` deletes it —
+and it broke the orchestrator image build. The `go` line at full patch is the pin instead,
+and `go.work` keeps both directives. Reproduced minimally in both directions.

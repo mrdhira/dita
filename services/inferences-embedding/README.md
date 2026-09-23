@@ -63,7 +63,9 @@ default model resident:
   30-second timeout, one lock serialises the work here, and past four in flight the answer is
   429. Measured in the deployed container, 8 passages of 400 tokens take 3.6 s on nomic and
   15.4 s on Qwen3, so with Qwen3 use `MAX_CONCURRENT_REQUESTS: "1"`.
-- **Leave `HINDSIGHT_API_RERANKER_*` commented out.** There is no `/rerank` here.
+- **`HINDSIGHT_API_RERANKER_*` does not point here.** There is no `/rerank` on this
+  container; reranking is [`inferences-reranker`](../inferences-reranker/README.md#the-memory-service),
+  whose README has the block for both.
 - **The model is fixed for the life of the store.** Hindsight detects the dimension from
   its first `/embed` and indexes for it. Loading a different model means re-embedding
   everything; `x-model-id` on every response says which model answered.

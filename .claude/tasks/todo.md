@@ -51,3 +51,29 @@ Order: `~/.hermes/tmp/dita-order-embedding.md`. Legend: `[ ]` todo · `[x]` done
   left alone as out of scope.
 - **Not verified**: model quality beyond the reference agreement; Hindsight actually cut over
   (its compose was not touched); the orchestrator driving this worker (it has no client yet).
+
+---
+
+# Task: `services/inferences-reranker`
+
+Order: `~/.hermes/tmp/dita-order-reranker.md`. Branch `feat/inferences-reranker`, stacked on
+`feat/inferences-embedding` (PR #11): it needs the worker's route seam, not yet on `main`.
+
+## Steps
+- [x] 1. Verify TEI's `/rerank` schema in its source (commit `29ccc53`) and Hindsight's client.
+- [x] 2. Find an ONNX export; prove it against the official model in fp32 before trusting it.
+- [x] 3. Extract what two services share into `packages/pylibs/textinfer`; embedding composes it.
+- [x] 4. `services/inferences-reranker`: models.yaml, `onnx_cross_encoder`, TEI routes, tests.
+- [x] 5. Dockerfile and `compose.yaml` on `proxy`; mem cap from measurement.
+- [x] 6. Docs under `docs/inferences/reranker/`, the two-stack Hindsight cutover.
+
+## Review
+- **Export**: `shawnw3i/…-seq-cls-ONNX` (fp16): ids identical to the reference, scores within
+  4.94e-4, every ranking equal. `n24q02m/…-ONNX` int8: up to 0.96 off, rejected.
+- **Found on the way**: a reload OOM-killed at 4 GB because glibc kept the unloaded model's
+  1.9 GB of freed heap. Fixed in the worker package (`malloc_trim` after release; 1900 → 86 MB),
+  which every worker gets. Cap set at 5g: at 4g the cgroup sat at its ceiling.
+- **Mutation**: 23 on the service, 15 on `textinfer`, 4 on the trim; all caught after three
+  weak tests were fixed (session options, refuse-not-wait, and one meaningless test deleted).
+- **Not verified**: Hindsight actually cut over; the orchestrator driving it; ranking quality
+  beyond agreement with the official model.

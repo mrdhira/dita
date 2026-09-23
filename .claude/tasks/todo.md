@@ -77,3 +77,36 @@ Order: `~/.hermes/tmp/dita-order-reranker.md`. Branch `feat/inferences-reranker`
   weak tests were fixed (session options, refuse-not-wait, and one meaningless test deleted).
 - **Not verified**: Hindsight actually cut over; the orchestrator driving it; ranking quality
   beyond agreement with the official model.
+
+---
+
+# Task: the inferences gateway in `services/dita-orchestrator`
+
+Order: `~/.hermes/tmp/dita-order-inferences-gateway.md`. Branch `feat/inferences-gateway` from
+`origin/main`. Not pushed: the run said do NOT push, which overrides the order's push-and-PR.
+
+## Steps
+- [x] 1. Verify how the orchestrator runs: it did not; its only stack is off `proxy`.
+- [x] 2. `handler/inferences`: embed, rerank, decide, workers, health; ReverseProxy pass-through.
+- [x] 3. Wire it into `router.go` and `serveRest.go`; server write deadline above the timeout.
+- [x] 4. Unit Makefile (test, coverage, build, image) and a Go allowance in `go-verify`.
+- [x] 5. `compose.yaml` on `proxy`, 2104 on loopback only.
+- [x] 6. Docs under `docs/inferences/gateway/`.
+
+## Verification
+- [x] Live: 1024-dimension embedding through the gateway, byte-identical to a direct call.
+- [x] Live: `decide` answers 503 naming `inferences-system-one`; `/workers` reports all three.
+- [x] Mutation pass over the gateway tests.
+- [x] `make doctor`, `make test`, `make coverage`, `make py-verify`, `make build`, in a clean worktree.
+
+## Review
+- **Network**: option 1, the orchestrator on `proxy`. Proven: the names do not resolve from the
+  host, and do from the gateway.
+- **Found on the way**: w-tools' 30 s server write deadline would have cut off the reranker; a
+  missing container is SERVFAIL, not NXDOMAIN, on Docker's resolver; a worker at its connection
+  cap reads as "server closed idle connection"; Hindsight's keep-alive pool filled all eight of
+  the embedding worker's HTTP slots; the reranker's DIP socket file had vanished from `run/`,
+  which is why its healthcheck said unhealthy while its HTTP answered.
+- **Not ours, but it fails `make test`**: the uncommitted `inferences-embedding/models.yaml`
+  change makes Qwen the default, and `test_the_default_is_the_english_model_and_says_so` fails.
+- **Not verified**: `/decide` against a real system-one worker; the dashboard; auth.

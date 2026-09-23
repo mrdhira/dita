@@ -7,7 +7,7 @@ requires-python = ">=3.14.6"
 
 dependencies = [
     "worker",
-    "onnxruntime>=1.30,<2",
+    "textinfer",
     "numpy>=2.5,<3",
     # The Rust tokenizer that reads tokenizer.json. The alternative is transformers, which
     # would pull torch in to do the same job.
@@ -16,6 +16,7 @@ dependencies = [
 
 [tool.uv.sources]
 worker = { workspace = true }
+textinfer = { workspace = true }
 
 [dependency-groups]
 dev = ["coverage>=7.16.1,<8"]

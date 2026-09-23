@@ -19,8 +19,6 @@ from embedding_worker.engines.onnx_embedder import (
     InvalidRequest,
     OnnxEmbedder,
     finish,
-    pad,
-    plan_batches,
     pool,
 )
 from worker import UnknownEngine
@@ -72,29 +70,6 @@ class FinishTest(unittest.TestCase):
     def test_a_zero_vector_stays_finite(self) -> None:
         result = finish(np.zeros((1, 4), dtype=np.float32), 4, True, False)
         self.assertTrue(np.isfinite(result).all())
-
-
-class PlanBatchesTest(unittest.TestCase):
-    def test_batches(self) -> None:
-        cases = [
-            ("all fit in one", [2, 3, 1], 12, [[1, 0, 2]]),
-            ("the budget splits them", [5, 5, 5], 10, [[0, 1], [2]]),
-            ("longest first, so padding stays small", [1, 6, 1, 6], 12, [[1, 3], [0, 2]]),
-            ("an input over the budget still gets a batch", [20, 1], 12, [[0], [1]]),
-        ]
-        for name, lengths, budget, expected in cases:
-            with self.subTest(name):
-                batches = plan_batches(lengths, budget)
-                self.assertEqual(batches, expected)
-                self.assertEqual(sorted(i for batch in batches for i in batch), list(range(len(lengths))))
-                for batch in (batch for batch in batches if len(batch) > 1):
-                    self.assertLessEqual(len(batch) * max(lengths[i] for i in batch), budget)
-
-    def test_pad(self) -> None:
-        ids, mask = pad([[7, 8, 9], [5]], pad_id=0)
-        np.testing.assert_array_equal(ids, [[7, 8, 9], [5, 0, 0]])
-        np.testing.assert_array_equal(mask, [[1, 1, 1], [1, 0, 0]])
-        self.assertEqual((ids.dtype, mask.dtype), (np.int64, np.int64))
 
 
 class ConfigTest(unittest.TestCase):

@@ -14,24 +14,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from textinfer import InputTooLong, InvalidRequest, feedable, feeds, open_session, pad, plan_batches
 from worker import Engine, Result
 
 POOLINGS = ("mean", "last_token", "graph")
 THREADS_ENV = "EMBEDDING_THREADS"
 EPSILON = 1e-12
-
-
-class InvalidRequest(ValueError):
-    """The caller asked for something this model cannot do: the one failure that is theirs."""
-
-
-class InputTooLong(InvalidRequest):
-    def __init__(self, index: int, tokens: int, limit: int) -> None:
-        super().__init__(
-            f"`inputs` must have less than {limit} tokens. Given: {tokens} (input {index}); "
-            "send `truncate: true` to cut it instead"
-        )
-        self.index, self.tokens, self.limit = index, tokens, limit
 
 
 @dataclass(frozen=True)
@@ -109,7 +97,7 @@ class Embedder:
             raise ValueError(f"pad_token {config.pad_token!r} is not in the tokenizer")
         self._pad_id = pad_id
         self._inputs = [(item.name, item.shape) for item in session.get_inputs()]
-        unknown = [name for name, _ in self._inputs if not _feedable(name)]
+        unknown = [name for name, _ in self._inputs if not feedable(name)]
         if unknown:
             raise ValueError(f"the graph wants inputs this adapter cannot feed: {', '.join(unknown)}")
         tokenizer.no_padding()
@@ -131,7 +119,7 @@ class Embedder:
         pooled = np.zeros((len(sequences), self._config.dimensions), dtype=np.float32)
         for group in plan_batches([len(ids) for ids in sequences], self._config.max_batch_tokens):
             input_ids, mask = pad([sequences[index] for index in group], self._pad_id)
-            output = self._session.run([self._config.output], self._feeds(input_ids, mask))[0]
+            output = self._session.run([self._config.output], feeds(self._inputs, input_ids, mask))[0]
             pooled[group] = pool(self._config.pooling, np.asarray(output, dtype=np.float32), mask)
 
         return finish(pooled, dimensions, request.normalize,
@@ -162,40 +150,14 @@ class Embedder:
                 sequences[index] = encoding.ids
         return sequences
 
-    def _feeds(self, input_ids: np.ndarray, mask: np.ndarray) -> Dict[str, np.ndarray]:
-        feeds: Dict[str, np.ndarray] = {}
-        for name, shape in self._inputs:
-            if name == "input_ids":
-                feeds[name] = input_ids
-            elif name == "attention_mask":
-                feeds[name] = mask
-            elif name == "token_type_ids":
-                feeds[name] = np.zeros_like(input_ids)
-            elif name == "position_ids":
-                feeds[name] = np.maximum(np.cumsum(mask, axis=1) - 1, 0)
-            else:
-                # A decoder exported with a KV cache: an empty past is a plain forward pass.
-                feeds[name] = np.zeros((input_ids.shape[0], shape[1], 0, shape[3]), dtype=np.float32)
-        return feeds
-
-
 class OnnxEmbedder(Engine):
     def __init__(self, model_dir: Path, options: Dict[str, Any]) -> None:
         super().__init__(model_dir, options)
 
-        import onnxruntime as ort
         from tokenizers import Tokenizer
 
         config = EmbedderConfig.from_options(options)
-        session_options = ort.SessionOptions()
-        session_options.log_severity_level = 3
-        # The arena keeps every high-water mark: one long batch would pin gigabytes for good.
-        session_options.enable_cpu_mem_arena = False
-        session_options.intra_op_num_threads = int(os.environ.get(THREADS_ENV, "0") or 0)
-        session = ort.InferenceSession(
-            str(model_dir / config.onnx), sess_options=session_options,
-            providers=["CPUExecutionProvider"],
-        )
+        session = open_session(model_dir / config.onnx, int(os.environ.get(THREADS_ENV, "0") or 0))
         tokenizer = Tokenizer.from_file(str(model_dir / config.tokenizer))
         self._embedder: Optional[Embedder] = Embedder(session, tokenizer, config)
 
@@ -217,29 +179,6 @@ class OnnxEmbedder(Engine):
         if self._embedder is None:
             raise RuntimeError("the engine was closed")
         return self._embedder
-
-
-def plan_batches(lengths: Sequence[int], max_batch_tokens: int) -> List[List[int]]:
-    """Longest first, so each batch pads to a length its members nearly share, and no batch
-    costs more than `max_batch_tokens` once padded. An input always gets a batch."""
-    batches: List[List[int]] = []
-    for index in sorted(range(len(lengths)), key=lambda i: -lengths[i]):
-        current = batches[-1] if batches else None
-        if current and (len(current) + 1) * lengths[current[0]] <= max_batch_tokens:
-            current.append(index)
-        else:
-            batches.append([index])
-    return batches
-
-
-def pad(sequences: Sequence[Sequence[int]], pad_id: int) -> Tuple[np.ndarray, np.ndarray]:
-    width = max(len(ids) for ids in sequences)
-    input_ids = np.full((len(sequences), width), pad_id, dtype=np.int64)
-    mask = np.zeros((len(sequences), width), dtype=np.int64)
-    for row, ids in enumerate(sequences):
-        input_ids[row, : len(ids)] = ids
-        mask[row, : len(ids)] = 1
-    return input_ids, mask
 
 
 def pool(strategy: str, output: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -266,12 +205,6 @@ def finish(pooled: np.ndarray, dimensions: int, normalize: bool, layer_norm: boo
     if normalize:
         vectors = vectors / np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), EPSILON)
     return vectors.astype(np.float32)
-
-
-def _feedable(name: str) -> bool:
-    return name in ("input_ids", "attention_mask", "token_type_ids", "position_ids") or (
-        name.startswith("past_key_values.")
-    )
 
 
 def _positive_int(value: Any) -> bool:

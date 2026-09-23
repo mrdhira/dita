@@ -12,10 +12,10 @@ WORKDIR /workspace
 COPY pyproject.toml uv.lock ./
 COPY --parents services/*/pyproject.toml packages/pylibs/*/pyproject.toml ./
 
-# --locked, not --frozen: only --locked verifies the lock against the manifests. dip and
-# worker are copied in as source below; an editable entry carries no hash for pip to check.
+# --locked, not --frozen: only --locked verifies the lock against the manifests. The workspace
+# packages are copied in as source below; an editable entry carries no hash for pip to check.
 RUN uv export --package inferences-embedding --locked --no-emit-project \
-        --no-emit-package dip --no-emit-package worker \
+        --no-emit-package dip --no-emit-package worker --no-emit-package textinfer \
         --no-default-groups --no-cache -o /tmp/requirements.txt
 
 FROM python:3.14.6-slim-trixie
@@ -37,6 +37,7 @@ COPY services/inferences-embedding/models.yaml ./
 COPY services/inferences-embedding/embedding_worker ./embedding_worker
 COPY packages/pylibs/dip/src/dip ./dip
 COPY packages/pylibs/worker/src/worker ./worker
+COPY packages/pylibs/textinfer/src/textinfer ./textinfer
 
 RUN mkdir -p "$MODELS_DIR" "$(dirname "$SOCKET_PATH")" \
     && chown -R embedding:embedding "$MODELS_DIR" "$(dirname "$SOCKET_PATH")"

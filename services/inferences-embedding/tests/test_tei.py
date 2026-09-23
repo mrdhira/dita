@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 
 from embedding_worker import tei
+from textinfer import TeiError
 from embedding_worker.engines.onnx_embedder import EmbedRequest
 
 
@@ -51,21 +52,10 @@ class ParseEmbedTest(unittest.TestCase):
         ]
         for name, body, error_type, message in cases:
             with self.subTest(name):
-                with self.assertRaises(tei.TeiError) as caught:
+                with self.assertRaises(TeiError) as caught:
                     tei.parse_embed(body)
                 self.assertEqual(caught.exception.error_type, error_type)
                 self.assertIn(message, str(caught.exception))
-
-    def test_each_error_type_has_teis_status(self) -> None:
-        cases = [("Unhealthy", 503), ("Backend", 424), ("Overloaded", 429), ("Validation", 422),
-                 ("Tokenizer", 422), ("Empty", 400)]
-        for error_type, status in cases:
-            with self.subTest(error_type):
-                response = tei.TeiError(error_type, "why").response()
-                self.assertEqual(response.status, status)
-                self.assertEqual(json.loads(response.body), {"error": "why", "error_type": error_type})
-                self.assertEqual(dict(response.headers).get("Retry-After"),
-                                 "1" if error_type == "Overloaded" else None)
 
 
 class NothingResidentTest(unittest.TestCase):

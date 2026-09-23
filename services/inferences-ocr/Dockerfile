@@ -1,7 +1,7 @@
 # ONNXRuntime-only OCR worker. Build context is the REPO ROOT: uv.lock lives there and a
-# context cannot reach outside itself. Exact patch and OS suffix, because a rolling tag
-# changes what ships and the apt names below are Debian-release specific.
-FROM ghcr.io/astral-sh/uv:0.12.13 AS uv
+# context cannot reach outside itself.
+# The OS suffix is pinned because the apt names below are Debian-release specific.
+FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
 
 FROM python:3.14.6-slim-trixie AS deps
 

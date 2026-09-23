@@ -137,9 +137,19 @@ In-memory state is one engine, one `(spec, loaded_at)` tuple assigned as a unit 
 reader cannot see a half-updated pair, a `loading` id, and a sticky `last_error` from the most
 recent failed load.
 
-**The dependency model** is the third piece of committed state, and it is repo-wide rather
+**This service is a composition.** The framework is
+[`packages/pylibs/dita-worker`](../../../packages/pylibs/dita-worker) — socket server, model
+manager, registry, fetcher, health and metrics — and the wire is
+[`packages/pylibs/dip`](../../../packages/pylibs/dip). What remains here is three engine
+adapters, `models.yaml` and a 36-line entrypoint. The seam is one dataclass and one
+callable: a `Worker` describing the service, and an engine factory mapping a name to an
+adapter. Nothing in the framework knows an OCR engine exists, which is what makes
+`inferences-stt` an engine plus a manifest rather than a fork.
+
+**The dependency model** is the fourth piece of committed state, and it is repo-wide rather
 than service-local. The root `pyproject.toml` is a **virtual uv workspace root** — no
-`[project]` table, only `[tool.uv.workspace]` with `members = ["services/inferences-*"]` — so
+`[project]` table, only `[tool.uv.workspace]` with
+`members = ["services/*", "packages/pylibs/*"]` — so
 every Python service resolves together into a single `uv.lock` at the repo root. Bounds are
 declared per service (`services/inferences-ocr/pyproject.toml`); exact versions and hashes
 live only in the lock. There is no `requirements.txt`.
@@ -162,47 +172,21 @@ Three consequences, all deliberate:
 
 ### Interfaces
 
-**Transport.** `AF_UNIX` / `SOCK_SEQPACKET` at `$SOCKET_PATH`, mode `0660`, on a directory
-shared with the orchestrator. Protocol version 2.
+**The wire protocol is DIP**, specified in
+[`docs/protocol/[1]dip-specification.md`](../../protocol/%5B1%5Ddip-specification.md) with
+its IDL at [`specs/dip/dip.schema.json`](../../../specs/dip/dip.schema.json). This service is
+a DIP **receiver** and uses `packages/pylibs/dip` rather than carrying its own
+implementation. Everything the protocol specifies — the framing, the ops and their fields,
+the limits, the error codes, the health contract, the versioning rules — lives there and is
+deliberately not repeated here, so the two cannot drift.
 
-**Framing.** A message is a prologue datagram followed by two chunked sections:
+What is specific to this service:
 
-```
-datagram 0     : {"protocol": 2, "control_len": N, "payload_len": M}
-next datagrams : the control block, chunks of at most 65536 bytes
-next datagrams : the payload, chunks of at most 65536 bytes
-```
-
-Both sections are chunked because an AF_UNIX datagram cannot exceed `SO_SNDBUF` — 212992
-bytes by default — above which `send` fails with `EMSGSIZE` rather than fragmenting. This is
-not hypothetical for the control block: a dense page yields 900 detected lines and a 221 KB
-response. SEQPACKET's preserved boundaries are what let the chunks need no per-chunk header;
-a length of zero means that section sends no datagrams at all, and since no conforming
-datagram is empty, an empty read means the peer closed.
-
-**Ops.**
-
-| op | request | response |
-| --- | --- | --- |
-| `handshake` / `version` | — | `service`, `version`, `protocol`, `limits`, `engines[]`, `ops[]`, `default_model`, `resident`, `loading` |
-| `list` | — | `models[]`, `default_model`, `resident`, `loading` |
-| `load` | `id` | `id`, `engine`, `already_resident`, `load_ms`, `unloaded` |
-| `unload` | — | `unloaded` |
-| `infer` | payload = encoded image bytes, no fields | `text`, `lines[]`, `model`, `infer_ms` |
-| `livez` / `readyz` / `startupz` | — | `probe`, `status`, `uptime_s`, `reasons[]` (+ `resident`, `loading` on `readyz`) |
-
-Every response carries `ok`. A failure is `{"ok": false, "error": {"code", "message"}}`;
-`code` is the stable contract and `message` is for humans. Codes: `bad_request`,
-`unknown_model`, `unsupported_engine`, `checksum_mismatch`, `fetch_failed`,
-`no_model_loaded`, `timeout`, `busy`, `response_too_large`, `internal`.
-
-**Limits**, advertised in the handshake so nothing is hard-coded: `max_chunk` 65536,
-`max_control` 8 MiB, `max_payload` 64 MiB, `idle_timeout_s` 300, `message_timeout_s` 30, and
-a cap of 16 concurrent connections.
-
-**Unknown fields are refused, not ignored.** Each op declares the fields it accepts
-(`load` takes `id`, with `model` as an alias; everything else takes none) and anything else
-is a `bad_request`. `infer` with a `model` field gets a message pointing at `load`.
+- **Socket path** `$SOCKET_PATH`, mode `0660`, in a directory shared with the orchestrator.
+- **`infer` payload** is an encoded image: PNG, JPEG or anything Pillow decodes.
+- **`load` ids** come from this service's `models.yaml`, and `list` returns that registry.
+- **`engines`** in the handshake are this service's three adapters.
+- **Concurrency**: at most 16 connections, then `busy`.
 
 **Idempotency and retries.** `load` is idempotent — loading what is already resident returns
 `already_resident: true` and builds nothing. `unload` on an empty worker returns
@@ -251,7 +235,7 @@ pre/post asymmetry: same operation, different side of the library boundary.
 | Digest or size mismatch | `checksum_mismatch` | Unchanged; the bad file is deleted, never loaded. |
 | Engine construction fails after a good fetch | the underlying error as `internal` | **Nothing resident.** Deliberate: the old engine was already released, and keeping it alive would break the invariant. `readyz` goes false. |
 | `infer` with nothing resident | `no_model_loaded` | Unchanged. |
-| Response over `max_control` | `response_too_large` | Connection stays open; the peer gets a code, not an EOF. |
+| Response over `max_control` | `response_too_large` | Nothing was sent: the encoder refuses before the first datagram, so the refusal is a whole message. The peer gets a code rather than an EOF, and the connection then closes by policy -- a response the receiver could not express means the request cannot be completed. |
 | Peer stalls mid-message | `timeout`, then the connection closes | The thread and its buffers are released. |
 | 17th concurrent connection | `busy`, then close after a drain window | Unchanged. |
 | Socket directory unwritable at boot | process exits 3 with a remediation message | Not serving. `startupz` would be false. |
@@ -269,8 +253,11 @@ pre/post asymmetry: same operation, different side of the library boundary.
 - `startupz` — one-time boot work finished: socket bound, registry parsed. False ⇒ **do not
   kill me, I am still booting**.
 
-Because there is no HTTP surface, these are protocol ops, and a container healthcheck is an
-exec probe: `python -m ocr_worker --probe ready`, exiting 0 or 1.
+These are protocol ops rather than URL paths, and a container healthcheck is an exec
+probe: `python -m ocr_worker --probe ready`, exiting 0 or 1. The worker does serve HTTP for
+metrics (see Observability), but health stays on the workload transport so a probe reads the
+same state a request would, and so a metrics port being down cannot make a healthy worker
+look dead.
 
 ## Alternatives considered
 
@@ -385,9 +372,35 @@ What to watch first, in the absence of a metrics stack: `readyz` flipping false 
 is telling you it cannot work and why, in `reasons`), and repeated `busy` responses (the
 orchestrator is opening connections faster than it closes them).
 
-Deliberately not shipped: a Prometheus endpoint. That would be an HTTP listener, and the
-argument in Alternatives applies. When metrics are wanted, the orchestrator should export
-them from the values it already receives.
+**Metrics are served over HTTP on a separate port**, and that is not a reversal of the
+no-HTTP argument. That argument is about the *workload*: DIP carries megabytes on the hot
+path, where an HTTP parser and a framing library would be a dependency bought for nothing. A
+scrape is a few kilobytes of text on a timer, every collector already speaks HTTP, and
+`http.server` costs no dependency at all. Different traffic, different answer.
+
+The contract:
+
+- **Prometheus text format** at `/metrics`, port from `METRICS_ADDR`, default
+  `127.0.0.1:9109`. Loopback by default so nothing is exposed by accident; compose binds it
+  on the container network and publishes no port for it.
+- **Counters** for ops by op and outcome, errors by code, loads by model, evictions, bytes
+  and files fetched, connections accepted and refused. **Histograms** for `load_duration`
+  and `infer_duration`, by model — a percentile is the question anyone actually asks, and a
+  gauge of the last value cannot answer it. **Gauges** for residency, loading and process
+  RSS and CPU.
+- **A scrape never waits on the worker's lock.** Counters use their own lock, held for a
+  dict update; gauges read `ModelManager`'s lock-free view. An inference cannot delay a
+  scrape and a scrape cannot delay an inference. Tested by holding the manager's lock open
+  with a slow engine and asserting the scrape still returns.
+- **Every counter moves on the path it names.** None is a placeholder; each is asserted
+  around a real call. Verified live: after one load and one inference, `ops_total` showed
+  one of each op, `infer_duration_seconds_sum` was 13.3669 against a reported 13367 ms, and
+  a cold load moved `fetched_bytes_total` to 21510548 across 4 files, which is exactly what
+  `models.yaml` pins.
+
+The collector is scraped by an opt-in VictoriaMetrics stack behind a compose profile. The
+orchestrator will expose its own `/metrics` later and the same stack will scrape it with no
+other change.
 
 ## Security and privacy
 
@@ -519,12 +532,17 @@ against uv: a service depends on a workspace member by name and declares
 `[tool.uv.sources] <name> = { workspace = true }`. It resolves into the same root `uv.lock`
 as `source = { editable = "packages/<name>" }` — no version pinning, and edits are live
 because it is installed editable. Services themselves stay `package = false` and appear as
-`virtual`; only real shared packages are installable. **The extraction is a follow-up**: the
-protocol, the registry and the fetcher are the obvious candidates, but nothing moves until a
-second worker exists to share them with, because one caller is not yet a pattern.
+`virtual`; only real shared packages are installable. **The extraction has happened**: the
+protocol lives in `packages/{golibs,pylibs}/dip` and everything a worker does except the
+inference lives in `packages/pylibs/dita-worker`. It was done with one caller to migrate
+rather than three to reconcile.
 
 ## Open questions
 
-- [ ] **Q:** Where do metrics go, given there is deliberately no HTTP endpoint here? Dhira
-  has asked for a recommendation; none is offered yet, so this stays open. — *owner:* Dhira
-  — *needed by:* the first dashboard.
+Metrics are settled: the worker serves Prometheus text on a small HTTP port of its own,
+scraped by an opt-in VictoriaMetrics stack. The reasoning is in Observability above.
+
+- [ ] **Q:** `InferResponse` is OCR-shaped — `lines` with a four-corner `box`, and
+  `additionalProperties: false` — so a speech worker cannot carry segments or timestamps
+  without a schema change. What shape should a generalised inference response take? See
+  "The STT seam" below. — *owner:* Dhira — *needed by:* `inferences-stt`.

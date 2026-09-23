@@ -21,7 +21,7 @@ dependencies = [
 worker = { workspace = true }
 
 [dependency-groups]
-dev = ["coverage>=7.6,<8"]
+dev = ["coverage>=7.16.1,<8"]
 
 [tool.uv]
 # An application, not a library: uv installs its dependencies but never builds or

@@ -1,0 +1,822 @@
+{
+  "_comment": "Validity cases for a schema template. The orchestrator's Go rules and the dashboard's zod schema must both reach these verdicts, with these issue paths.",
+  "cases": [
+    {
+      "name": "the smallest valid template",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "every type, a score range, twenty options",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "a",
+            "type": "noul",
+            "options": [
+              "yes",
+              "no",
+              "unknown"
+            ]
+          },
+          {
+            "name": "b",
+            "type": "score",
+            "options": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15",
+              "16",
+              "17",
+              "18",
+              "19",
+              "20"
+            ],
+            "range": {
+              "min": 1,
+              "max": 20
+            }
+          },
+          {
+            "name": "c",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "twenty questions",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "q0",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q1",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q2",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q3",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q4",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q5",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q6",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q7",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q8",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q9",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q10",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q11",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q12",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q13",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q14",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q15",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q16",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q17",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q18",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q19",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "an option of exactly 100 characters",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "y"
+            ]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "a description of exactly 500 characters",
+      "template": {
+        "name": "alert-triage",
+        "description": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "an uppercase template name",
+      "template": {
+        "name": "Alert",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "name"
+      ]
+    },
+    {
+      "name": "a one-letter template name",
+      "template": {
+        "name": "a",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "name"
+      ]
+    },
+    {
+      "name": "a template name with a space",
+      "template": {
+        "name": "alert triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "name"
+      ]
+    },
+    {
+      "name": "a description of 501 characters",
+      "template": {
+        "name": "alert-triage",
+        "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "description"
+      ]
+    },
+    {
+      "name": "no questions",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": []
+      },
+      "issues": [
+        "questions"
+      ]
+    },
+    {
+      "name": "twenty-one questions",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "q0",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q1",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q2",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q3",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q4",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q5",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q6",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q7",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q8",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q9",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q10",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q11",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q12",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q13",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q14",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q15",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q16",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q17",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q18",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q19",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "q20",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions"
+      ]
+    },
+    {
+      "name": "a question name with a dash",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "sev-level",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.name"
+      ]
+    },
+    {
+      "name": "a question name twice",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "a",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          },
+          {
+            "name": "a",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.1.name"
+      ]
+    },
+    {
+      "name": "an unknown type",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "free_text",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.type"
+      ]
+    },
+    {
+      "name": "one option",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "only"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "twenty-one options",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "o0",
+              "o1",
+              "o2",
+              "o3",
+              "o4",
+              "o5",
+              "o6",
+              "o7",
+              "o8",
+              "o9",
+              "o10",
+              "o11",
+              "o12",
+              "o13",
+              "o14",
+              "o15",
+              "o16",
+              "o17",
+              "o18",
+              "o19",
+              "o20"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a blank option",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "  "
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options.1"
+      ]
+    },
+    {
+      "name": "an option of 101 characters",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "y"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options.0"
+      ]
+    },
+    {
+      "name": "an option twice",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high",
+              "low"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options.2"
+      ]
+    },
+    {
+      "name": "a range on a choice question",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ],
+            "range": {
+              "min": 0,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.range"
+      ]
+    },
+    {
+      "name": "a range with min not below max",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "score",
+            "options": [
+              "1",
+              "2"
+            ],
+            "range": {
+              "min": 2,
+              "max": 2
+            }
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.range"
+      ]
+    },
+    {
+      "name": "several faults at once",
+      "template": {
+        "name": "X",
+        "description": "",
+        "questions": [
+          {
+            "name": "a",
+            "type": "bad",
+            "options": [
+              "one"
+            ]
+          },
+          {
+            "name": "a",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "name",
+        "questions.0.options",
+        "questions.0.type",
+        "questions.1.name"
+      ]
+    }
+  ]
+}

@@ -100,16 +100,23 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, name, path str
 		},
 		Transport: g.proxy,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			status, reason := classify(r.Context(), err)
+			reason := WriteUnavailable(w, r.Context(), worker, g.cfg.Timeout, err)
 			g.log.WarnContext(r.Context(), "inference worker did not answer",
 				slog.String("worker", name), slog.String("reason", reason), slog.Any("err", err))
-			writeJSON(w, status, failure{
-				Error: describe(worker, reason, g.cfg.Timeout, err), ErrorType: "Unhealthy",
-				Worker: name, URL: worker.URL.String(), Reason: reason,
-			})
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// WriteUnavailable answers for a worker that gave no response at all, the way every gateway
+// route does, and returns the reason it wrote.
+func WriteUnavailable(w http.ResponseWriter, ctx context.Context, worker Worker, timeout time.Duration, err error) string {
+	status, reason := classify(ctx, err)
+	writeJSON(w, status, failure{
+		Error: describe(worker, reason, timeout, err), ErrorType: "Unhealthy",
+		Worker: worker.Name, URL: worker.URL.String(), Reason: reason,
+	})
+	return reason
 }
 
 // failure is TEI's error body, {error, error_type}, plus which worker and why, so a TEI

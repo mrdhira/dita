@@ -43,7 +43,14 @@ and it exits non-zero, so it also works as a CI gate.
 
 Python is the one tool asdf does not have to provide: uv provisions the interpreter for the
 workspace, so `doctor` asks uv what this repo would run rather than reading whatever
-`python3` happens to be first on your PATH. If it is missing, `uv python install 3.14`.
+`python3` happens to be first on your PATH. If it is missing,
+`uv python install $(cat .python-version)`.
+
+**The interpreter is pinned to an exact patch**, in [`.python-version`](.python-version),
+and `doctor` asserts that exact version rather than the minor. A rolling tag changes what
+you ran without changing anything you wrote. The same discipline applies to Go: every
+`go.mod` carries `go` at the pinned patch and [`go.work`](go.work) carries that plus a
+matching `toolchain` directive, which `doctor` also checks.
 
 ```bash
 make test        # every service's tests

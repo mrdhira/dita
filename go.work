@@ -1,6 +1,11 @@
 go 1.27.1
 
+toolchain go1.27.1
+
+// go.work has no glob: add modules under packages/golibs with `make go-work-sync`
+// (go work use -r), which expands them into the list below.
 use (
-    ./services/dita-orchestrator
-    ./services/inferences-ocr/examples/go
+	./packages/golibs/dip
+	./services/dita-orchestrator
+	./services/inferences-ocr/examples/go
 )

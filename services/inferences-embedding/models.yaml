@@ -1,0 +1,122 @@
+# Weights are never committed: every file is pinned to an immutable revision and a sha256
+# computed from a real download, and the fetcher refuses anything else. Field meanings are
+# in docs/inferences/embedding/[1]technical-requirement.md#data-model.
+
+version: 1
+default_model: nomic-embed-text-v1.5
+
+models:
+  - id: nomic-embed-text-v1.5
+    description: >-
+      nomic-ai/nomic-embed-text-v1.5 as ONNX. English only: do not select it for Indonesian
+      or Japanese text. Asymmetric, so queries and documents need their prefixes. The default.
+    engine: onnx_embedder
+    langs: [en]
+    source:
+      type: huggingface
+      repo: nomic-ai/nomic-embed-text-v1.5
+      revision: e9b6763023c676ca8431644204f50c2b100d9aab
+    files:
+      - path: onnx/model.onnx
+        sha256: 147d5aa88c2101237358e17796cf3a227cead1ec304ec34b465bb08e9d952965
+        bytes: 547310275
+      - path: tokenizer.json
+        sha256: d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66
+        bytes: 711396
+    options:
+      onnx: onnx/model.onnx
+      tokenizer: tokenizer.json
+      pad_token: "[PAD]"
+      output: last_hidden_state
+      pooling: mean
+      # nomic's Matryoshka recipe layer-norms the pooled vector before truncating it.
+      matryoshka_layer_norm: true
+      dimensions: 768
+      matryoshka_dimensions: [512, 256, 128, 64]
+      max_sequence_length: 8192
+      # Trained at 2048; the export has no rotary scaling, so longer inputs are refused.
+      max_input_tokens: 2048
+      max_batch_tokens: 4096
+      prompts:
+        query: "search_query: "
+        document: "search_document: "
+        clustering: "clustering: "
+        classification: "classification: "
+
+  - id: embeddinggemma-300m
+    description: >-
+      google/embeddinggemma-300m as ONNX (onnx-community export: the google repo is gated).
+      Multilingual, 100+ languages, 300M parameters. Gemma Terms of Use apply.
+    engine: onnx_embedder
+    langs: [en, id, ja]
+    source:
+      type: huggingface
+      repo: onnx-community/embeddinggemma-300m-ONNX
+      revision: 5090578d9565bb06545b4552f76e6bc2c93e4a66
+    files:
+      - path: onnx/model.onnx
+        sha256: ea91fd315a7c152d427d231746f0f811a1ac93beaba656abfdf2b24e091265e4
+        bytes: 479932
+      - path: onnx/model.onnx_data
+        sha256: ef835ae565d8695236652475903078e8ed794c7c35faf1164d78ec3238e8a88d
+        bytes: 1234521088
+      - path: tokenizer.json
+        sha256: 4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47
+        bytes: 20323312
+    options:
+      onnx: onnx/model.onnx
+      tokenizer: tokenizer.json
+      pad_token: "<pad>"
+      # The graph ends in mean pooling, both Dense projections and L2 normalisation.
+      output: sentence_embedding
+      pooling: graph
+      dimensions: 768
+      matryoshka_dimensions: [512, 256, 128]
+      max_sequence_length: 2048
+      max_input_tokens: 2048
+      max_batch_tokens: 4096
+      prompts:
+        query: "task: search result | query: "
+        document: "title: none | text: "
+        question_answering: "task: question answering | query: "
+        fact_checking: "task: fact checking | query: "
+        classification: "task: classification | query: "
+        clustering: "task: clustering | query: "
+        similarity: "task: sentence similarity | query: "
+        code_retrieval: "task: code retrieval | query: "
+
+  - id: qwen3-embedding-0.6b
+    description: >-
+      Qwen/Qwen3-Embedding-0.6B as ONNX (onnx-community export). Multilingual, 100+
+      languages, strongest here on Indonesian and Japanese: the multilingual choice.
+    engine: onnx_embedder
+    langs: [en, id, ja]
+    source:
+      type: huggingface
+      repo: onnx-community/Qwen3-Embedding-0.6B-ONNX
+      revision: c25a394dd583836952667c12f008335071b3f43d
+    files:
+      - path: onnx/model.onnx
+        sha256: bf27b2f3f9ef9c32ca337d75b361fa99439deaeaefe82e4701b2dbd8439197cc
+        bytes: 307161415
+      - path: onnx/model.onnx_data
+        sha256: f0a61604465929a27e68aa6217c8c89ec6186572f0209fdb7711adda48a9b9a9
+        bytes: 2093436928
+      - path: tokenizer.json
+        sha256: def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a
+        bytes: 11423705
+    options:
+      onnx: onnx/model.onnx
+      tokenizer: tokenizer.json
+      pad_token: "<|endoftext|>"
+      output: last_hidden_state
+      pooling: last_token
+      dimensions: 1024
+      matryoshka_dimensions: [768, 512, 256, 128, 64, 32]
+      max_sequence_length: 32768
+      # Measured: one 8000-token input needs over 12 GB here; 2048 peaks near 4 GB.
+      max_input_tokens: 2048
+      max_batch_tokens: 4096
+      prompts:
+        query: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+        document: ""

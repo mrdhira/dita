@@ -11,8 +11,10 @@ run/*
 services/inferences-*/models/*
 !services/inferences-*/models/.gitkeep
 
-# Compiled Go example binaries (`go build` names them after the directory).
+# Compiled Go binaries: the example (`go build` names it after its directory) and
+# `make build` in the orchestrator.
 services/inferences-ocr/examples/go/go
+services/dita-orchestrator/bin/
 
 # Go coverage profiles, written by each unit's `make coverage` so the floor can read a
 # total. The Python equivalent, .coverage, is ignored below.

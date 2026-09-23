@@ -7,6 +7,7 @@ members = [
     "dip",
     "inferences-embedding",
     "inferences-ocr",
+    "inferences-reranker",
     "textinfer",
     "worker",
 ]
@@ -417,6 +418,33 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.3,<13" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "rapidocr", specifier = ">=3.9.2,<4" },
+    { name = "worker", editable = "packages/pylibs/worker" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.16.1,<8" }]
+
+[[package]]
+name = "inferences-reranker"
+version = "0.1.0"
+source = { virtual = "services/inferences-reranker" }
+dependencies = [
+    { name = "numpy" },
+    { name = "textinfer" },
+    { name = "tokenizers" },
+    { name = "worker" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.5,<3" },
+    { name = "textinfer", editable = "packages/pylibs/textinfer" },
+    { name = "tokenizers", specifier = ">=0.23.2,<1" },
     { name = "worker", editable = "packages/pylibs/worker" },
 ]
 

@@ -1,0 +1,45 @@
+# Weights are never committed: every file is pinned to an immutable revision and a sha256
+# computed from a real download, and the fetcher refuses anything else. Field meanings are
+# in docs/inferences/reranker/[1]technical-requirement.md#data-model.
+
+version: 1
+default_model: qwen3-reranker-0.6b
+
+models:
+  - id: qwen3-reranker-0.6b
+    description: >-
+      Qwen/Qwen3-Reranker-0.6B as a one-logit sequence classifier in ONNX (fp16). Multilingual,
+      100+ languages including Indonesian and Japanese. Scores agree with the official model
+      to 5e-4.
+    engine: onnx_cross_encoder
+    langs: [en, id, ja]
+    source:
+      type: huggingface
+      repo: shawnw3i/Qwen3-Reranker-0.6B-seq-cls-ONNX
+      revision: e5d273d8d9fbbc0dc5021008e0242d3cd85bb60d
+    files:
+      - path: model.onnx
+        dest: onnx/model.onnx
+        sha256: bd3ee3865c63d1bec518d0785ff551f7c0b78af0d4bf4855653a0c765a2a1292
+        bytes: 1192779696
+      # From the official repository: the graph is third-party, the tokenizer need not be.
+      - repo: Qwen/Qwen3-Reranker-0.6B
+        revision: e61197ed45024b0ed8a2d74b80b4d909f1255473
+        path: tokenizer.json
+        sha256: aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4
+        bytes: 11422654
+    options:
+      onnx: onnx/model.onnx
+      tokenizer: tokenizer.json
+      pad_token: "<|endoftext|>"
+      output: logits
+      prefix: "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n"
+      suffix: "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+      instruction: "Given a web search query, retrieve relevant passages that answer the query"
+      max_sequence_length: 32768
+      # Measured: one 1024-token pair peaks at 3.5 GB, a 4096-token one at 4.7 GB and 84 s.
+      max_input_tokens: 1024
+      max_batch_tokens: 1024
+      # TEI's --auto-truncate: a request that does not say `truncate` gets this. The memory
+      # service never says it, and an over-long memory must not fail its whole recall.
+      auto_truncate: true

@@ -1,0 +1,49 @@
+# Its own stack, so the memory service can reach it by name on the shared `proxy` network.
+# `make up` from this directory. Run on the host that owns ../../run and ./models.
+name: inferences-embedding
+
+services:
+  inferences-embedding:
+    build:
+      context: ../..
+      dockerfile: services/inferences-embedding/Dockerfile
+    image: dita-inferences-embedding:local
+    container_name: inferences-embedding
+    restart: unless-stopped
+    environment:
+      MODELS_DIR: /models
+      SOCKET_PATH: /run/dita/inferences-embedding.sock
+      # TEI's /embed, /info and /health, beside /metrics. Reachable only on `proxy`.
+      METRICS_ADDR: 0.0.0.0:8080
+      # Stands in for the orchestrator until it drives this worker: something must load a
+      # model before the memory service's first request. A DIP `load` still replaces it.
+      PRELOAD_MODEL: nomic-embed-text-v1.5
+      EMBEDDING_THREADS: "4"
+      EMBEDDING_LOG_LEVEL: info
+    # No ports: Caddy fronts anything public, and the memory containers use the name.
+    expose:
+      - "8080"
+    volumes:
+      # Fetched on first load and verified by sha256; never in the image, never in git.
+      - ./models:/models
+      - ../../run:/run/dita
+    # Qwen3 is the largest selectable model: 5.2 GB peak measured at the input and batch
+    # limits in models.yaml. nomic peaks at 2.2 GB, EmbeddingGemma at 1.3 GB.
+    mem_limit: 6g
+    memswap_limit: 6g
+    cpus: 4
+    # The bind mounts belong to the invoking user; the image's own uid 10001 could not write them.
+    user: "${UID:-1000}:${GID:-1000}"
+    healthcheck:
+      test: ["CMD", "python", "-m", "embedding_worker", "--probe", "ready"]
+      # The preload (up to a 2.4 GB fetch and graph optimisation) runs before the socket binds.
+      start_period: 300s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

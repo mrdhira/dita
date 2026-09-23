@@ -1,0 +1,30 @@
+# The dashboard's origin on loopback: Caddy serving dist/ and proxying /api/inferences to the
+# orchestrator by name on `proxy`. `make up` builds dist/ first. No LAN hostname and no LAN
+# port until the orchestrator has auth: 8443 is bound to 127.0.0.1 only.
+name: inferences-dashboard
+
+services:
+  inferences-dashboard:
+    image: caddy:2.11.4
+    container_name: inferences-dashboard
+    restart: unless-stopped
+    environment:
+      DASHBOARD_ADDR: https://localhost:8443
+      DASHBOARD_API_UPSTREAM: dita-orchestrator-rest:2104
+    ports:
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./dist:/srv:ro
+      - dashboard-caddy-data:/data
+    mem_limit: 128m
+    cpus: 0.5
+    networks:
+      - proxy
+
+volumes:
+  dashboard-caddy-data:
+
+networks:
+  proxy:
+    external: true

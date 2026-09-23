@@ -1,0 +1,47 @@
+# The dashboard's origin: the static SPA and a same-origin /api proxy to the orchestrator.
+# Loopback / dev origin only. There is no LAN hostname until the orchestrator has auth; the
+# block for one is the same with the address and `tls internal` changed, and it is gated.
+{
+	admin off
+	local_certs
+	skip_install_trust
+	auto_https disable_redirects
+}
+
+{$DASHBOARD_ADDR:https://localhost:8443} {
+	# 0.0.0.0 inside the compose container, whose port is published on 127.0.0.1 only; a
+	# host-network run (the e2e) passes 127.0.0.1 so it never listens on the LAN.
+	bind {$DASHBOARD_BIND:0.0.0.0}
+	tls internal
+
+	header {
+		# No 'unsafe-inline' and no 'unsafe-eval': the build emits no inline script or style.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		-Server
+	}
+
+	# Only the inferences prefix: /api/v1/chat spends an LLM key and is not the dashboard's.
+	handle /api/inferences/* {
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy {$DASHBOARD_API_UPSTREAM:dita-orchestrator-rest:2104}
+	}
+	handle /api/* {
+		respond "not served on this origin" 404
+	}
+
+	handle {
+		root * {$DASHBOARD_ROOT:/srv}
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		file_server
+	}
+}

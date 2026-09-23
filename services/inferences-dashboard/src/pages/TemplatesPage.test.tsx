@@ -52,6 +52,9 @@ describe("TemplatesPage", () => {
     renderAt("/templates", "/templates", <TemplatesPage />);
     await userEvent.click(await screen.findByRole("button", { name: "alert-triage v1" }));
     expect(screen.getByText("editing alert-triage: saving writes v2")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "question 1 options" }).value).toBe("low\nhigh");
+    const options = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "question 1 options",
+    });
+    expect(options.value).toBe("low\nhigh");
   });
 });

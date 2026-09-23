@@ -36,3 +36,4 @@ services/inferences-dashboard/coverage/
 services/inferences-dashboard/test-results/
 services/inferences-dashboard/playwright-report/
 services/inferences-dashboard/*.tsbuildinfo
+services/inferences-dashboard/sbom.cdx.json

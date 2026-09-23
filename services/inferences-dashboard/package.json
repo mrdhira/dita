@@ -9,13 +9,14 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/check-dist.mjs dist",
+    "build": "tsc -b && vite build && node scripts/check-dist.mjs dist && pnpm sbom --sbom-format cyclonedx --sbom-type application --prod --out sbom.cdx.json",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "e2e": "playwright test --workers=1"
+    "e2e": "playwright test --workers=1",
+    "audit": "pnpm audit --prod"
   },
   "dependencies": {
     "@tanstack/react-query": "5.103.2",

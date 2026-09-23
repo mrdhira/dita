@@ -9,7 +9,7 @@ help:
 	@echo "test      lint, then the unit suite (Vitest + React Testing Library)"
 	@echo "coverage  the unit suite under coverage, with the floors in vite.config.ts"
 	@echo "lint      eslint and prettier --check"
-	@echo "build     typecheck, bundle, and fail on any key-shaped string in dist/"
+	@echo "build     typecheck, bundle, fail on any key-shaped string in dist/, write the SBOM"
 	@echo "e2e       the Playwright scenario against a real orchestrator and a stub worker"
 	@echo "audit     pnpm audit --prod"
 	@echo "up        serve dist/ through Caddy on loopback (compose.yaml)"
@@ -31,7 +31,10 @@ lint: install
 build: install
 	$(PNPM) build
 
+# The real orchestrator binary over a fresh store, Caddy with the production headers, and
+# the labelled stub in place of inferences-system-one. Headless, one worker: this box is tight.
 e2e: install build
+	$(MAKE) -C ../dita-orchestrator build
 	$(PNPM) e2e
 
 audit:

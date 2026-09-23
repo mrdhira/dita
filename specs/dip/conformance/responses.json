@@ -1,0 +1,444 @@
+{
+  "corpus": "dip-responses",
+  "protocol": 2,
+  "note": "Real response bodies that both implementations must decode with their GENERATED types. The framing corpus proves bytes reassemble; this proves the types accept what the other language actually sends. Added after a generated Go validator rejected a valid infer response: it applied the outer minItems of `box` (4 corners) to the inner point arrays (2 numbers), so every real OCR result was refused with `field box[0] length: must be >= 4`. The framing corpus could not have caught it.",
+  "cases": [
+    {
+      "name": "infer with boxes and confidences",
+      "type": "InferResponse",
+      "body": {
+        "ok": true,
+        "text": "Hello dita OCR 2026\nThe quick brown fox\n日本語のテキスト認識",
+        "lines": [
+          {
+            "text": "Hello dita OCR 2026",
+            "confidence": 0.96812,
+            "box": [
+              [
+                37.0,
+                41.0
+              ],
+              [
+                509.0,
+                40.0
+              ],
+              [
+                510.0,
+                90.0
+              ],
+              [
+                37.0,
+                91.0
+              ]
+            ]
+          },
+          {
+            "text": "The quick brown fox",
+            "confidence": 0.99056,
+            "box": [
+              [
+                30.0,
+                116.0
+              ],
+              [
+                514.0,
+                113.0
+              ],
+              [
+                514.0,
+                178.0
+              ],
+              [
+                30.0,
+                181.0
+              ]
+            ]
+          },
+          {
+            "text": "日本語のテキスト認識",
+            "confidence": 1.0,
+            "box": [
+              [
+                39.0,
+                193.0
+              ],
+              [
+                507.0,
+                193.0
+              ],
+              [
+                507.0,
+                254.0
+              ],
+              [
+                39.0,
+                254.0
+              ]
+            ]
+          }
+        ],
+        "model": "rapidocr-ppocrv5",
+        "infer_ms": 966.2
+      }
+    },
+    {
+      "name": "infer from an engine that does not localise text",
+      "why": "manga-ocr returns one line, no box",
+      "type": "InferResponse",
+      "body": {
+        "ok": true,
+        "text": "今日はいい天気ですね",
+        "lines": [
+          {
+            "text": "今日はいい天気ですね",
+            "confidence": 0.99997,
+            "box": null
+          }
+        ],
+        "model": "manga-ocr",
+        "infer_ms": 353.7
+      }
+    },
+    {
+      "name": "infer that found nothing",
+      "type": "InferResponse",
+      "body": {
+        "ok": true,
+        "text": "",
+        "lines": [],
+        "model": "tesseract",
+        "infer_ms": 12.0
+      }
+    },
+    {
+      "name": "infer with a null confidence",
+      "why": "an engine may localise without scoring",
+      "type": "InferResponse",
+      "body": {
+        "ok": true,
+        "text": "x",
+        "lines": [
+          {
+            "text": "x",
+            "confidence": null,
+            "box": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0
+              ],
+              [
+                1.0,
+                1.0
+              ],
+              [
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        ],
+        "model": "tesseract",
+        "infer_ms": 1.0
+      }
+    },
+    {
+      "name": "handshake with nothing resident",
+      "type": "HandshakeResponse",
+      "body": {
+        "ok": true,
+        "service": "inferences-ocr",
+        "version": "0.1.0",
+        "protocol": 2,
+        "limits": {
+          "max_chunk": 65536,
+          "max_control": 8388608,
+          "max_payload": 67108864,
+          "idle_timeout_s": 300,
+          "message_timeout_s": 30
+        },
+        "engines": [
+          "rapidocr",
+          "tesseract",
+          "manga_ocr"
+        ],
+        "ops": [
+          "handshake",
+          "version",
+          "list",
+          "load",
+          "unload",
+          "infer",
+          "livez",
+          "readyz",
+          "startupz"
+        ],
+        "default_model": "rapidocr-ppocrv5",
+        "resident": null,
+        "loading": null
+      }
+    },
+    {
+      "name": "handshake with a model resident",
+      "type": "HandshakeResponse",
+      "body": {
+        "ok": true,
+        "service": "inferences-ocr",
+        "version": "0.1.0",
+        "protocol": 2,
+        "limits": {
+          "max_chunk": 65536,
+          "max_control": 8388608,
+          "max_payload": 67108864,
+          "idle_timeout_s": 300,
+          "message_timeout_s": 30
+        },
+        "engines": [
+          "rapidocr",
+          "tesseract",
+          "manga_ocr"
+        ],
+        "ops": [
+          "handshake",
+          "version",
+          "list",
+          "load",
+          "unload",
+          "infer",
+          "livez",
+          "readyz",
+          "startupz"
+        ],
+        "default_model": "rapidocr-ppocrv5",
+        "resident": {
+          "id": "rapidocr-ppocrv5",
+          "engine": "rapidocr",
+          "langs": [
+            "ja",
+            "en",
+            "zh"
+          ],
+          "resident_seconds": 12.5
+        },
+        "loading": null
+      }
+    },
+    {
+      "name": "handshake while a model is downloading",
+      "type": "HandshakeResponse",
+      "body": {
+        "ok": true,
+        "service": "inferences-ocr",
+        "version": "0.1.0",
+        "protocol": 2,
+        "limits": {
+          "max_chunk": 65536,
+          "max_control": 8388608,
+          "max_payload": 67108864,
+          "idle_timeout_s": 300,
+          "message_timeout_s": 30
+        },
+        "engines": [
+          "rapidocr",
+          "tesseract",
+          "manga_ocr"
+        ],
+        "ops": [
+          "handshake",
+          "version",
+          "list",
+          "load",
+          "unload",
+          "infer",
+          "livez",
+          "readyz",
+          "startupz"
+        ],
+        "default_model": "rapidocr-ppocrv5",
+        "resident": null,
+        "loading": "manga-ocr"
+      }
+    },
+    {
+      "name": "list",
+      "type": "ListResponse",
+      "body": {
+        "ok": true,
+        "models": [
+          {
+            "id": "rapidocr-ppocrv5",
+            "description": "PP-OCRv5 as ONNX",
+            "engine": "rapidocr",
+            "langs": [
+              "ja",
+              "en",
+              "zh"
+            ],
+            "source_type": "huggingface",
+            "files": 4,
+            "bytes": 21510548,
+            "unverified_files": []
+          },
+          {
+            "id": "tesseract",
+            "description": "the system binary",
+            "engine": "tesseract",
+            "langs": [
+              "ja",
+              "en"
+            ],
+            "source_type": "system",
+            "files": 0,
+            "bytes": 0,
+            "unverified_files": []
+          }
+        ],
+        "default_model": "rapidocr-ppocrv5",
+        "resident": null,
+        "loading": null
+      }
+    },
+    {
+      "name": "list while a model is downloading",
+      "why": "the only case with a non-null `loading`: with all of them null, deleting the field from a generated type survives, because absence and null are the same on this wire",
+      "type": "ListResponse",
+      "body": {
+        "ok": true,
+        "models": [
+          {
+            "id": "manga-ocr",
+            "description": "japanese vertical text",
+            "engine": "manga_ocr",
+            "langs": [
+              "ja"
+            ],
+            "source_type": "huggingface",
+            "files": 5,
+            "bytes": 460965376,
+            "unverified_files": []
+          }
+        ],
+        "default_model": "rapidocr-ppocrv5",
+        "resident": {
+          "id": "rapidocr-ppocrv5",
+          "engine": "rapidocr",
+          "langs": [
+            "ja",
+            "en",
+            "zh"
+          ],
+          "resident_seconds": 41.2
+        },
+        "loading": "manga-ocr"
+      }
+    },
+    {
+      "name": "load that evicted nothing",
+      "type": "LoadResponse",
+      "body": {
+        "ok": true,
+        "id": "rapidocr-ppocrv5",
+        "engine": "rapidocr",
+        "already_resident": false,
+        "load_ms": 6074.2,
+        "unloaded": null
+      }
+    },
+    {
+      "name": "load that evicted a model",
+      "type": "LoadResponse",
+      "body": {
+        "ok": true,
+        "id": "manga-ocr",
+        "engine": "manga_ocr",
+        "already_resident": false,
+        "load_ms": 2375.3,
+        "unloaded": "rapidocr-ppocrv5"
+      }
+    },
+    {
+      "name": "unload with nothing loaded",
+      "type": "UnloadResponse",
+      "body": {
+        "ok": true,
+        "unloaded": null
+      }
+    },
+    {
+      "name": "readyz passing",
+      "type": "ProbeResponse",
+      "body": {
+        "ok": true,
+        "probe": "readyz",
+        "status": "pass",
+        "uptime_s": 12.345,
+        "reasons": [],
+        "resident": null,
+        "loading": null
+      }
+    },
+    {
+      "name": "readyz during a cold load",
+      "why": "a load in flight is progress, not a wedge: readyz still passes, `resident` still names the outgoing model, and `loading` names the incoming one",
+      "type": "ProbeResponse",
+      "body": {
+        "ok": true,
+        "probe": "readyz",
+        "status": "pass",
+        "uptime_s": 5.06,
+        "reasons": [],
+        "resident": {
+          "id": "rapidocr-ppocrv5",
+          "engine": "rapidocr",
+          "langs": [
+            "ja",
+            "en",
+            "zh"
+          ],
+          "resident_seconds": 3.1
+        },
+        "loading": "manga-ocr"
+      }
+    },
+    {
+      "name": "readyz failing with reasons",
+      "type": "ProbeResponse",
+      "body": {
+        "ok": false,
+        "probe": "readyz",
+        "status": "fail",
+        "uptime_s": 0.5,
+        "reasons": [
+          "the models directory /models is not writable"
+        ],
+        "resident": null,
+        "loading": null
+      }
+    },
+    {
+      "name": "livez, which carries no resident field",
+      "type": "ProbeResponse",
+      "body": {
+        "ok": true,
+        "probe": "livez",
+        "status": "pass",
+        "uptime_s": 41.2,
+        "reasons": []
+      }
+    },
+    {
+      "name": "an error response",
+      "type": "ErrorResponse",
+      "body": {
+        "ok": false,
+        "error": {
+          "code": "no_model_loaded",
+          "message": "no model is loaded; send `load` with a model id from `list` before `infer`"
+        }
+      }
+    }
+  ]
+}

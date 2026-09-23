@@ -37,12 +37,28 @@ not in a diff.
   name. They are documentation that cannot go stale silently.
 - **Docstrings say why**, not what. A module docstring explaining a non-obvious boundary
   earns its place; one narrating what the next line does does not.
-- **Comments must earn their place.** The root `pyproject.toml` once reached 61% comments.
-  Keep a comment where it prevents a real mistake, in one or two lines. History and rationale
-  belong in the README or the technical requirement.
 - Match the file you are in. Consistency beats a better idea introduced halfway down a file.
 - Exceptions carry a code and a message: the code is the contract, the message is for humans.
   Never let a bare `except` swallow something a caller needed to know.
+
+## Comments
+
+A comment exists to prevent a mistake. Nothing else earns its place.
+
+Keep: a non-obvious why (a footgun, a spec quirk, a limit that would surprise a reader); the
+contract a caller cannot infer from the code (what it guarantees, what it refuses); a build
+tag or a generated-file marker.
+
+Cut: what the code already says; how the file got here, what was tried, what went wrong
+before; a restated signature, field name or JSON key; section banners; anything a reviewer
+would call narration.
+
+Where the cut text belongs instead: the pull request description, `docs/`, or
+`.claude/tasks/lessons.md`. Not the source.
+
+The bar: a reader should find the file comparable to the Go standard library, which is close
+to comment-free. As a smell test, comment lines stay well under 10% of a source file; above
+that, the file is usually carrying prose that belongs somewhere else.
 
 ## Tests
 

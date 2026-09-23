@@ -5,17 +5,25 @@
 UNIT_ROOTS := $(wildcard services packages)
 
 # maxdepth 4 reaches services/<svc>/examples/<lang>/, the deepest unit shape here.
+# node_modules is excluded: some npm packages ship a Makefile at a depth this reaches.
 UNIT_DIRS := $(if $(UNIT_ROOTS),$(shell find $(UNIT_ROOTS) -mindepth 2 -maxdepth 4 \
-             -name Makefile ! -path '*/.*' 2>/dev/null | sed 's|/Makefile$$||' | sort))
+             -name Makefile ! -path '*/.*' ! -path '*/node_modules/*' 2>/dev/null \
+             | sed 's|/Makefile$$||' | sort))
 
+# A unit's class is its marker file, never the absence of another one: "no go.mod means
+# Python" would run a React app through uv.
 GO_UNITS := $(strip $(foreach d,$(UNIT_DIRS),$(if $(wildcard $(d)/go.mod),$(d))))
-PY_UNITS := $(filter-out $(GO_UNITS),$(UNIT_DIRS))
-# strip matters: with both halves empty this is a single space, which $(if) reads as true.
-UNITS    := $(strip $(PY_UNITS) $(GO_UNITS))
+JS_UNITS := $(strip $(foreach d,$(filter-out $(GO_UNITS),$(UNIT_DIRS)),$(if $(wildcard $(d)/package.json),$(d))))
+PY_UNITS := $(strip $(foreach d,$(filter-out $(GO_UNITS) $(JS_UNITS),$(UNIT_DIRS)),$(if $(wildcard $(d)/pyproject.toml),$(d))))
+UNCLASSIFIED := $(filter-out $(GO_UNITS) $(JS_UNITS) $(PY_UNITS),$(UNIT_DIRS))
+$(if $(UNCLASSIFIED),$(error units with no go.mod, package.json or pyproject.toml: $(UNCLASSIFIED)))
+# strip matters: with every class empty this is a single space, which $(if) reads as true.
+UNITS    := $(strip $(PY_UNITS) $(GO_UNITS) $(JS_UNITS))
 
 # Every go.mod on the branch, so modules without a test contract stay visible.
 GO_MODULES   := $(if $(UNIT_ROOTS),$(shell find $(UNIT_ROOTS) -maxdepth 4 \
-                -name go.mod ! -path '*/.*' 2>/dev/null | sed 's|/go\.mod$$||' | sort))
+                -name go.mod ! -path '*/.*' ! -path '*/node_modules/*' 2>/dev/null \
+                | sed 's|/go\.mod$$||' | sort))
 GO_UNTESTED  := $(filter-out $(GO_UNITS),$(GO_MODULES))
 
 PY_PKGS := $(filter packages/pylibs/%,$(PY_UNITS))
@@ -85,6 +93,7 @@ help:
 units:
 	@echo "python units: $(if $(PY_UNITS),$(PY_UNITS),(none))"
 	@echo "go units:     $(if $(GO_UNITS),$(GO_UNITS),(none))"
+	@echo "js units:     $(if $(JS_UNITS),$(JS_UNITS),(none))"
 	@echo "verify:       $(if $(VERIFY_HALVES),$(VERIFY_HALVES),(nothing to verify on this branch))"
 	@$(if $(GO_UNTESTED),echo "go modules without a Makefile (no test contract -- not run): $(GO_UNTESTED)",:)
 

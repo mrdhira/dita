@@ -134,6 +134,17 @@ else
     printf '%s\n' "$MODCHECK" | sed 's/^/        /'
 fi
 
+# The dashboard is the one JS unit: node runs its tooling and pnpm owns its lockfile.
+NODE_WANT=$(pinned nodejs)
+NODE_HAVE=$(command -v node >/dev/null 2>&1 && node --version 2>/dev/null | sed 's/^v//')
+[ "$NODE_HAVE" = "$NODE_WANT" ] && m=yes || m=no
+check node nodejs "$NODE_WANT" "$NODE_HAVE" "$m"
+
+PNPM_WANT=$(pinned pnpm)
+PNPM_HAVE=$(command -v pnpm >/dev/null 2>&1 && pnpm --version 2>/dev/null)
+[ "$PNPM_HAVE" = "$PNPM_WANT" ] && m=yes || m=no
+check pnpm pnpm "$PNPM_WANT" "$PNPM_HAVE" "$m"
+
 GIT_HAVE=$(command -v git >/dev/null 2>&1 && git --version 2>/dev/null | awk '{print $3}')
 check git git "any" "$GIT_HAVE" yes
 

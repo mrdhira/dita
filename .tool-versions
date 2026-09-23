@@ -1,3 +1,5 @@
 golang 1.27.1
 python 3.14.6
 uv 0.12.13
+nodejs 26.7.0
+pnpm 12.6.0

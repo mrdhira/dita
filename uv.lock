@@ -251,6 +251,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pyyaml" },
     { name = "rapidocr" },
+    { name = "worker" },
 ]
 
 [package.dev-dependencies]
@@ -266,6 +267,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.3,<13" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "rapidocr", specifier = ">=3.9.2,<4" },
+    { name = "worker", editable = "packages/pylibs/worker" },
 ]
 
 [package.metadata.requires-dev]

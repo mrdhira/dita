@@ -1,23 +1,16 @@
-"""Engine adapters, looked up by the `engine` field in models.yaml.
-
-Imports are lazy so that a missing optional dependency only breaks the engine that
-needs it, not the whole worker.
-"""
+"""Engine adapters, looked up by the `engine` field in models.yaml. Imports are lazy so a
+missing optional dependency breaks only the engine that needs it."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict
 
-from .base import Box, Engine, Line, Result
+from worker import Engine, UnknownEngine
 
-__all__ = ["Box", "Engine", "Line", "Result", "build_engine", "ENGINE_NAMES"]
+__all__ = ["ENGINE_NAMES", "build_engine"]
 
 ENGINE_NAMES = ("rapidocr", "tesseract", "manga_ocr")
-
-
-class UnknownEngine(Exception):
-    """models.yaml names an engine this worker does not implement."""
 
 
 def build_engine(name: str, model_dir: Path, options: Dict[str, Any]) -> Engine:

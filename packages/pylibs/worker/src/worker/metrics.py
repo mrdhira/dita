@@ -1,4 +1,5 @@
-"""Prometheus text metrics, served on a small HTTP port of their own.
+"""Prometheus text metrics, served on a small HTTP port of their own, beside any routes a
+service names (see `routes.py`).
 
 A scrape never touches the worker's lock: counters live under their own lock, held for a
 dict update and nothing else, and the gauges are read from `ModelManager`'s lock-free view.
@@ -17,7 +18,9 @@ import resource
 import socket
 import threading
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+
+from .routes import MAX_REQUEST_BODY, Response, Route
 
 LOG = logging.getLogger(__name__)
 
@@ -310,8 +313,11 @@ def serve(
     address: Tuple[str, int],
     request_timeout: float = REQUEST_TIMEOUT,
     max_scrapes: int = MAX_SCRAPES,
+    routes: Optional[Mapping[str, Route]] = None,
 ):
-    """Start the metrics server on its own daemon thread. Returns the server."""
+    """Start the metrics server on its own daemon thread. Returns the server. `routes` share
+    the connection cap with scrapes, so a route that can be slow must bound itself."""
+    routes = dict(routes or {})
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -321,15 +327,50 @@ def serve(
         timeout = request_timeout
 
         def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
-            if self.path.split("?")[0] not in ("/metrics", "/"):
+            path = self.path.split("?")[0]
+            if path in routes:
+                self._route(routes[path], b"")
+                return
+            if path not in ("/metrics", "/"):
                 self.send_error(404, "only /metrics")
                 return
             body = metrics.render(worker_name, manager).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            self._send(Response(200, body, "text/plain; version=0.0.4; charset=utf-8"))
+
+        def do_POST(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+            route = routes.get(self.path.split("?")[0])
+            if route is None:
+                self.send_error(404)
+                return
+            length = self.headers.get("Content-Length")
+            if length is None or not length.isdigit():
+                # Keep-alive cannot find the next request without it, so the socket goes too.
+                self.close_connection = True
+                self.send_error(411, "a request body needs a Content-Length")
+                return
+            if int(length) > MAX_REQUEST_BODY:
+                self.close_connection = True
+                self.send_error(413, f"request body over {MAX_REQUEST_BODY} bytes")
+                return
+            self._route(route, self.rfile.read(int(length)))
+
+        def _route(self, route: Route, body: bytes) -> None:
+            try:
+                response = route(manager, self.command, body)
+            except Exception:  # noqa: BLE001 - one bad request must not kill the port
+                LOG.exception("route %s %s failed", self.command, self.path)
+                self.send_error(500)
+                return
+            self._send(response)
+
+        def _send(self, response: Response) -> None:
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.content_type)
+            self.send_header("Content-Length", str(len(response.body)))
+            for name, value in response.headers:
+                self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(response.body)
 
         def version_string(self) -> str:
             # The default appends the exact interpreter version, telling an unauthenticated

@@ -13,6 +13,7 @@ from .fetcher import ChecksumError, FetchError, ensure_model, model_dir
 from .health import Health
 from .manager import ModelManager, NoModelLoaded
 from .metrics import Metrics
+from .routes import MAX_REQUEST_BODY, Response, Route, json_response
 from .registry import ModelFile, ModelSpec, Registry, RegistryError, load_registry
 from .server import MAX_CONNECTIONS, SocketDirectoryError, SocketServer, dispatch
 from .worker import Worker
@@ -28,6 +29,7 @@ __all__ = [
     "Health",
     "Line",
     "MAX_CONNECTIONS",
+    "MAX_REQUEST_BODY",
     "Metrics",
     "ModelFile",
     "ModelManager",
@@ -35,7 +37,9 @@ __all__ = [
     "NoModelLoaded",
     "Registry",
     "RegistryError",
+    "Response",
     "Result",
+    "Route",
     "SocketDirectoryError",
     "SocketServer",
     "UnknownEngine",
@@ -44,6 +48,7 @@ __all__ = [
     "cli",
     "dispatch",
     "ensure_model",
+    "json_response",
     "load_registry",
     "model_dir",
 ]

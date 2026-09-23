@@ -11,6 +11,7 @@ nothing else.
 | --- | --- | --- | --- |
 | [`services/dita-orchestrator`](services/dita-orchestrator) | Go | The control plane. Client-facing REST on `:2104`, chat handling, and the client for every inference worker. | running |
 | [`services/inferences-ocr`](services/inferences-ocr/README.md) | Python | OCR worker. PP-OCRv5 (ja/en/zh) by default, plus tesseract and manga-ocr. ONNXRuntime only. | **this is the first worker** |
+| [`services/inferences-embedding`](services/inferences-embedding/README.md) | Python | Text embeddings: nomic-embed-text-v1.5 (en, default), EmbeddingGemma and Qwen3-Embedding (multilingual). DIP for lifecycle, TEI's `/embed` for vectors. | in review |
 | `services/inferences-stt` | Python | Speech to text. | placeholder |
 | `services/inferences-tts` | Python | Text to speech. | placeholder |
 

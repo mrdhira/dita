@@ -28,6 +28,7 @@ but the two things below.
 | `engines.py` | the `Engine` ABC, `Line`/`Result`, and the factory type a service supplies |
 | `cli.py` | the flags, the env vars, `--probe`, and the serve loop |
 | `metrics.py` | the Prometheus counters and the small HTTP port that serves them |
+| `routes.py` | `Response` and the `Route` type: the service-supplied HTTP routes on that same port |
 
 The package never names an engine: it is handed a factory and calls it. It holds no
 knowledge of a model format, a media type, or how any engine works.
@@ -164,6 +165,29 @@ This is not a claim, it is a test.
 six-line engine, a temporary two-model manifest, a `Worker` — and drives it over a real
 socket through handshake, list, load, infer and unload. It imports nothing from any service.
 If the seam ever leaks, that test stops compiling.
+
+## Routes
+
+A worker whose workload is HTTP by contract names its routes on the `Worker`, and they are
+served on the metrics port rather than on a second server:
+
+```python
+WORKER = Worker(..., routes={"/embed": embed, "/info": info})
+
+def embed(manager, method, body) -> Response:
+    model_id, vectors, _ = manager.run(lambda engine: engine.embed(parse(body)))
+    return json_response(200, vectors)
+```
+
+The framework owns the body: `Content-Length` is required (411 without it) and capped at
+`MAX_REQUEST_BODY`, 2 MiB (413 above it, refused on the header before a byte is read). The
+route owns everything else, every status included. `ModelManager.run(work)` is how a route
+reaches the engine: the same lock and the same infer metrics as `infer`, and the same
+`NoModelLoaded` when nothing is resident — a route never loads a model.
+
+Routes share the port's eight connections with scrapes, so a route that can wait on the
+lock must cap itself below that. They also share its switch: `METRICS_ADDR=off` turns both
+off. `inferences-embedding` is the one worker that uses this, for TEI's `/embed`.
 
 ## Metrics
 

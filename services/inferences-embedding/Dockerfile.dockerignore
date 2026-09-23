@@ -1,0 +1,21 @@
+# Read by BuildKit because it sits beside the Dockerfile; a .dockerignore in this directory
+# would not be, since the context is the repo root. Without it the weights are the context.
+**/models/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.coverage
+run/
+docs/
+specs/
+packages/golibs/
+packages/pylibs/*/tests/
+deployment/
+services/*
+!services/*/pyproject.toml
+!services/inferences-embedding/
+services/inferences-embedding/tests/
+services/inferences-embedding/README.md
+.claude/
+.github/
+.git/

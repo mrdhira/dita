@@ -9,6 +9,7 @@ socket, which is what the container healthcheck execs.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import io
 import os
 import signal
@@ -20,7 +21,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from worker import ModelManager, SocketServer, fetcher, load_registry
+from worker import ModelManager, Response, SocketServer, fetcher, load_registry
 from worker import metrics as metrics_mod
 from worker.cli import build_parser, main, probe_line, run_probe
 
@@ -298,6 +299,34 @@ class MainTest(unittest.TestCase):
         # Bindable again, which is only true because main gave the port back.
         with socket.create_server(started[0].server_address[:2]) as rebound:
             self.assertEqual(rebound.getsockname()[1], started[0].server_address[1])
+
+    def test_the_routes_a_worker_names_are_served_by_the_port_main_starts(self) -> None:
+        locked = self.root / "locked"
+        locked.mkdir()
+        locked.chmod(0o500)
+        self.addCleanup(locked.chmod, 0o700)
+        worker = replace(
+            self.worker, routes={"/hello": lambda manager, method, body: Response(200, b"hi")}
+        )
+
+        answers = []
+        real_serve = metrics_mod.serve
+
+        def ask(*args, **kwargs):
+            server = real_serve(*args, **kwargs)
+            conn = http.client.HTTPConnection(*server.server_address[:2], timeout=5)
+            conn.request("GET", "/hello")
+            response = conn.getresponse()
+            answers.append((response.status, response.read()))
+            conn.close()
+            return server
+
+        with mock.patch.object(metrics_mod, "serve", ask):
+            with self.assertLogs("worker.cli", level="ERROR"):
+                main(worker, ["--socket", str(locked / "sub" / "w.sock"),
+                              "--models-dir", str(self.root / "models")])
+
+        self.assertEqual(answers, [(200, b"hi")])
 
     def test_a_socket_directory_it_cannot_use_exits_three(self) -> None:
         """The docker-volume-owned-by-root failure: a reason, not a traceback."""

@@ -8,12 +8,10 @@ FROM python:3.14.6-slim-trixie AS deps
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /workspace
 
-# Manifests and lock only, so editing the worker does not rebuild dependencies.
+# Manifests and lock only, so editing the worker does not rebuild dependencies. Every
+# member's manifest, not only this one's: --locked compares the lock with the whole workspace.
 COPY pyproject.toml uv.lock ./
-COPY services/inferences-ocr/pyproject.toml services/inferences-ocr/pyproject.toml
-# Workspace members this service depends on: --locked reads every manifest in the lock.
-COPY packages/pylibs/dip/pyproject.toml packages/pylibs/dip/pyproject.toml
-COPY packages/pylibs/worker/pyproject.toml packages/pylibs/worker/pyproject.toml
+COPY --parents services/*/pyproject.toml packages/pylibs/*/pyproject.toml ./
 
 # --locked, not --frozen: only --locked verifies the lock against the manifests, so a bound
 # edited without `make lock` fails the build here. --no-default-groups keeps dev-only

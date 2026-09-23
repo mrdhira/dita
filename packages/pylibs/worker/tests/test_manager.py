@@ -173,3 +173,59 @@ class OneModelResidentTest(unittest.TestCase):
 
         self.assertEqual(inferred_during_fetch, ["alpha"])
         self.assertEqual(self.manager.resident()["id"], "beta")
+
+
+class RunTest(unittest.TestCase):
+    """`run` is `infer` without the result shape: the same lock, the same metrics, and the
+    same refusal to load anything on the caller's behalf."""
+
+    def setUp(self) -> None:
+        FakeEngine.built.clear()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.metrics = Metrics()
+        self.manager = ModelManager(
+            load_registry(write_registry(Path(directory.name))), Path(directory.name),
+            build_fake_engine, self.metrics,
+        )
+
+    def test_nothing_resident_is_refused_and_the_work_never_runs(self) -> None:
+        ran = []
+        with self.assertRaises(NoModelLoaded):
+            self.manager.run(lambda engine: ran.append(engine))
+        self.assertEqual(ran, [])
+
+    def test_the_work_gets_the_resident_engine_and_is_timed(self) -> None:
+        self.manager.load("gamma")
+        model_id, value, infer_ms = self.manager.run(lambda engine: engine.name)
+
+        self.assertEqual((model_id, value), ("gamma", "upper"))
+        self.assertGreaterEqual(infer_ms, 0)
+        self.assertEqual(self.metrics.infer_seconds.totals, {"gamma": 1})
+
+    # Not a table row: a load raced against work that holds the lock.
+    def test_a_swap_cannot_happen_while_the_work_runs(self) -> None:
+        self.manager.load("alpha")
+        inside = threading.Event()
+        release = threading.Event()
+        seen = []
+
+        def slow(engine):
+            inside.set()
+            release.wait(timeout=10)
+            seen.append((engine.name, engine.closed))
+            return engine.name
+
+        runner = threading.Thread(target=self.manager.run, args=(slow,))
+        runner.start()
+        self.assertTrue(inside.wait(timeout=5))
+        loader = threading.Thread(target=self.manager.load, args=("beta",))
+        loader.start()
+        loader.join(timeout=0.2)
+        self.assertTrue(loader.is_alive(), "the load did not wait for the work")
+
+        release.set()
+        runner.join(timeout=10)
+        loader.join(timeout=10)
+        self.assertEqual(seen, [("echo", False)])
+        self.assertEqual(self.manager.resident()["id"], "beta")

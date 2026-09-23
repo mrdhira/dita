@@ -148,7 +148,11 @@ def main(worker: Worker, argv: list[str] | None = None) -> int:
     except ValueError as exc:
         LOG.error("%s", exc)
         return 2
-    metrics_server = metrics_mod.serve(collector, worker.name, manager, address) if address else None
+    metrics_server = (
+        metrics_mod.serve(collector, worker.name, manager, address, routes=worker.routes)
+        if address
+        else None
+    )
 
     def shutdown(signum: int, _frame: object) -> None:
         LOG.info("signal %s, shutting down", signal.Signals(signum).name)

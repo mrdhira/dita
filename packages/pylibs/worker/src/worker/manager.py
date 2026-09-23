@@ -13,14 +13,16 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
 
 from . import fetcher
-from .engines import Engine, EngineFactory, Result
+from .engines import Engine, EngineFactory
 from .metrics import Metrics
 from .registry import ModelSpec, Registry
 
 LOG = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class NoModelLoaded(Exception):
@@ -163,6 +165,15 @@ class ModelManager:
         if not payload:
             raise ValueError("infer needs the input in the message payload, which arrived empty")
 
+        model_id, result, infer_ms = self.run(lambda engine: engine.infer(payload))
+        response = result.as_dict()
+        response["model"] = model_id
+        response["infer_ms"] = infer_ms
+        return response
+
+    def run(self, work: Callable[[Engine], T]) -> Tuple[str, T, float]:
+        """Call `work` with the resident engine, under the same lock and the same metrics as
+        `infer`: (model id, what it returned, milliseconds). Never loads anything."""
         with self._lock:
             if self._engine is None or self._resident is None:
                 raise NoModelLoaded(
@@ -170,17 +181,13 @@ class ModelManager:
                 )
             model_id = self._resident[0].id
             started = time.monotonic()
-            result: Result = self._engine.infer(payload)
+            value = work(self._engine)
             infer_ms = round((time.monotonic() - started) * 1000, 1)
 
         # Outside the lock: a metrics update must never extend the critical section.
         if self._metrics is not None:
             self._metrics.inferred(model_id, infer_ms / 1000)
-
-        response = result.as_dict()
-        response["model"] = model_id
-        response["infer_ms"] = infer_ms
-        return response
+        return model_id, value, infer_ms
 
     def _already_resident(self, spec: ModelSpec) -> Optional[Dict[str, Any]]:
         current = self._resident

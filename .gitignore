@@ -27,3 +27,12 @@ __pycache__/
 *.egg-info/
 .coverage
 htmlcov/
+
+# JS: dependencies, build output, and what vitest and Playwright write. pnpm-lock.yaml is
+# deliberately NOT here -- it is committed beside the app.
+node_modules/
+services/inferences-dashboard/dist/
+services/inferences-dashboard/coverage/
+services/inferences-dashboard/test-results/
+services/inferences-dashboard/playwright-report/
+services/inferences-dashboard/*.tsbuildinfo

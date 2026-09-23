@@ -1,0 +1,50 @@
+# Its own stack, so the memory service can reach it by name on the shared `proxy` network.
+# `make up` from this directory. Run on the host that owns ../../run and ./models.
+name: inferences-reranker
+
+services:
+  inferences-reranker:
+    build:
+      context: ../..
+      dockerfile: services/inferences-reranker/Dockerfile
+    image: dita-inferences-reranker:local
+    container_name: inferences-reranker
+    restart: unless-stopped
+    environment:
+      MODELS_DIR: /models
+      SOCKET_PATH: /run/dita/inferences-reranker.sock
+      # TEI's /rerank, /info and /health, beside /metrics. Reachable only on `proxy`.
+      METRICS_ADDR: 0.0.0.0:8080
+      # Stands in for the orchestrator until it drives this worker: something must load the
+      # model before the memory service's first recall. A DIP `load` or `unload` still rules.
+      PRELOAD_MODEL: qwen3-reranker-0.6b
+      RERANKER_THREADS: "4"
+      RERANKER_LOG_LEVEL: info
+    # No ports: Caddy fronts anything public, and the memory containers use the name.
+    expose:
+      - "8080"
+    volumes:
+      # Fetched on first load and verified by sha256; never in the image, never in git.
+      - ./models:/models
+      - ../../run:/run/dita
+    # Measured: batches at the 1024-token limit peak at 3.5-3.8 GB, and at 4g the container's
+    # cgroup sat at its ceiling through a reload, with only page cache left to reclaim.
+    mem_limit: 5g
+    memswap_limit: 5g
+    cpus: 4
+    # The bind mounts belong to the invoking user; the image's own uid 10001 could not write them.
+    user: "${UID:-1000}:${GID:-1000}"
+    healthcheck:
+      test: ["CMD", "python", "-m", "reranker_worker", "--probe", "ready"]
+      # The preload (a 1.2 GB fetch and graph optimisation on a cold volume) runs before the
+      # socket binds.
+      start_period: 300s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

@@ -13,6 +13,7 @@ import threading
 import unittest
 from pathlib import Path
 from typing import Any, Dict
+from unittest import mock
 
 from worker import (
     FetchError,
@@ -23,6 +24,7 @@ from worker import (
     dispatch,
     fetcher,
     load_registry,
+    memory,
 )
 
 from .support import FakeEngine, build_fake_engine, fake_worker, write_registry
@@ -229,3 +231,46 @@ class RunTest(unittest.TestCase):
         loader.join(timeout=10)
         self.assertEqual(seen, [("echo", False)])
         self.assertEqual(self.manager.resident()["id"], "beta")
+
+
+class MemoryReturnTest(unittest.TestCase):
+    """A released engine's heap goes back to the OS before anything else is built, and only
+    when something was released: a trim is a full collection, not free."""
+
+    def setUp(self) -> None:
+        FakeEngine.built.clear()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.manager = ModelManager(load_registry(write_registry(Path(directory.name))),
+                                    Path(directory.name), build_fake_engine)
+        self.events: list = []
+        patcher = mock.patch.object(memory, "trim", side_effect=lambda: self.events.append(
+            ("trim", [engine.name for engine in FakeEngine.alive()])))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_when_memory_is_handed_back(self) -> None:
+        cases = [
+            ("the first load releases nothing", lambda: self.manager.load("alpha"), []),
+            ("loading what is resident releases nothing", lambda: self.manager.load("alpha"), []),
+            ("a swap trims after the old engine closes, before the new one exists",
+             lambda: self.manager.load("beta"), [("trim", [])]),
+            ("an unload trims", self.manager.unload, [("trim", [])]),
+            ("unloading nothing does not", self.manager.unload, []),
+        ]
+        for name, action, expected in cases:
+            with self.subTest(name):
+                self.events.clear()
+                action()
+                self.assertEqual(self.events, expected)
+
+
+class TrimTest(unittest.TestCase):
+    def test_glibc_is_asked_where_there_is_one(self) -> None:
+        with mock.patch.object(memory, "_looked", False), mock.patch.object(memory, "_libc", None):
+            self.assertTrue(memory.trim())
+
+    def test_without_malloc_trim_it_says_so_rather_than_fails(self) -> None:
+        with mock.patch.object(memory, "_looked", False), \
+                mock.patch.object(memory.ctypes, "CDLL", side_effect=OSError("no libc")):
+            self.assertFalse(memory.trim())

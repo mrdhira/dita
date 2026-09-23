@@ -3,9 +3,8 @@
 Order: `~/.hermes/tmp/dita-order-embedding.md`. Legend: `[ ]` todo · `[x]` done.
 
 ## Deviations from the order, decided up front
-- **Branch and PR.** The order says branch `feat/inferences-embedding` and open a PR. The user's
-  instruction for this run overrides it: commit on the current branch (`main`), separate
-  commits, **do not push**, so no PR.
+- **Branch and PR.** Work lives on `feat/inferences-embedding`, branched from `main`; the PR
+  is opened from it and never merged here. `main` is not committed to.
 - **Gemma weights come from `onnx-community/embeddinggemma-300m-ONNX`.** `google/embeddinggemma-300m`
   is gated (`gated: manual`) and the fetcher has no auth by design (no tokens in the repo).
 - **The TEI surface lives on the worker's existing HTTP port** (the metrics server in

@@ -34,7 +34,7 @@ models:
       dimensions: 768
       matryoshka_dimensions: [512, 256, 128, 64]
       max_sequence_length: 8192
-      # Trained at 2048; the export has no rotary scaling, so longer inputs are refused.
+      # Trained at 2048 and configured with no rotary scaling, so longer inputs are refused.
       max_input_tokens: 2048
       max_batch_tokens: 4096
       prompts:

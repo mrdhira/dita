@@ -310,5 +310,6 @@ would double it.
   small next to the graph, but it serialises for no reason. Worth moving out once measured.
 - [ ] **Q:** Qwen3 on this CPU is slow enough to trip a 30-second client timeout at TEI's
   default batch. Quantise a better export, or accept it as the multilingual price?
-- [ ] **Follow-up:** `Qwen/Qwen3-Reranker-0.6B` for `/rerank` (0.6B / 4B / 8B, like the
-  embedding family). Until then Hindsight's reranker must not point here.
+- [x] **Follow-up:** `Qwen/Qwen3-Reranker-0.6B` for `/rerank` (0.6B / 4B / 8B, like the
+  embedding family) is [`inferences-reranker`](../reranker/%5B1%5Dtechnical-requirement.md),
+  a separate worker. Hindsight's reranker points there, never here.

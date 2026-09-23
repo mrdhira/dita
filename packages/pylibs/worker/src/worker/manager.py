@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
 
-from . import fetcher
+from . import fetcher, memory
 from .engines import Engine, EngineFactory
 from .metrics import Metrics
 from .registry import ModelSpec, Registry
@@ -202,11 +202,14 @@ class ModelManager:
         }
 
     def _release(self) -> None:
-        """Drop the resident engine. Caller must hold the lock."""
-        if self._engine is not None:
+        """Drop the resident engine and hand its memory back. Caller must hold the lock."""
+        released = self._engine is not None
+        if released:
             try:
                 self._engine.close()
             except Exception:  # noqa: BLE001 - a failing close must not strand us mid-swap
                 LOG.exception("closing the resident engine failed; dropping the reference anyway")
         self._engine = None
         self._resident = None
+        if released:
+            memory.trim()

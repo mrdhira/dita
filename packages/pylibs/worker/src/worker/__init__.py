@@ -7,7 +7,7 @@ is `dip`; nothing here reimplements framing.
 
 from __future__ import annotations
 
-from . import cli
+from . import cli, memory
 from .engines import Box, Engine, EngineFactory, Line, Result, UnknownEngine
 from .fetcher import ChecksumError, FetchError, ensure_model, model_dir
 from .health import Health
@@ -50,5 +50,6 @@ __all__ = [
     "ensure_model",
     "json_response",
     "load_registry",
+    "memory",
     "model_dir",
 ]

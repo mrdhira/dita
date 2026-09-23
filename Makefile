@@ -23,6 +23,7 @@ GO_PKGS := $(filter packages/golibs/%,$(GO_UNITS))
 
 # yaml is the worker's manifest reader; named here so it stays a decision rather than drift.
 PY_ALLOW_worker := --allow yaml
+PY_ALLOW_textinfer := --allow numpy,onnxruntime
 
 # Which halves of the dependency gate this branch can actually run.
 VERIFY_HALVES := $(strip $(if $(GO_UNITS),go-verify) $(if $(PY_PKGS),py-verify))

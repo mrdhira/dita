@@ -7,6 +7,8 @@ members = [
     "dip",
     "inferences-embedding",
     "inferences-ocr",
+    "inferences-reranker",
+    "textinfer",
     "worker",
 ]
 
@@ -368,7 +370,7 @@ version = "0.1.0"
 source = { virtual = "services/inferences-embedding" }
 dependencies = [
     { name = "numpy" },
-    { name = "onnxruntime" },
+    { name = "textinfer" },
     { name = "tokenizers" },
     { name = "worker" },
 ]
@@ -381,7 +383,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.5,<3" },
-    { name = "onnxruntime", specifier = ">=1.30,<2" },
+    { name = "textinfer", editable = "packages/pylibs/textinfer" },
     { name = "tokenizers", specifier = ">=0.23.2,<1" },
     { name = "worker", editable = "packages/pylibs/worker" },
 ]
@@ -416,6 +418,33 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.3,<13" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "rapidocr", specifier = ">=3.9.2,<4" },
+    { name = "worker", editable = "packages/pylibs/worker" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.16.1,<8" }]
+
+[[package]]
+name = "inferences-reranker"
+version = "0.1.0"
+source = { virtual = "services/inferences-reranker" }
+dependencies = [
+    { name = "numpy" },
+    { name = "textinfer" },
+    { name = "tokenizers" },
+    { name = "worker" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.5,<3" },
+    { name = "textinfer", editable = "packages/pylibs/textinfer" },
+    { name = "tokenizers", specifier = ">=0.23.2,<1" },
     { name = "worker", editable = "packages/pylibs/worker" },
 ]
 
@@ -714,6 +743,31 @@ sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
 ]
+
+[[package]]
+name = "textinfer"
+version = "0.1.0"
+source = { editable = "packages/pylibs/textinfer" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "worker" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.5,<3" },
+    { name = "onnxruntime", specifier = ">=1.30,<2" },
+    { name = "worker", editable = "packages/pylibs/worker" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "coverage", specifier = ">=7.16.1,<8" }]
 
 [[package]]
 name = "tokenizers"

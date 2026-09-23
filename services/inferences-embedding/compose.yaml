@@ -17,7 +17,7 @@ services:
       METRICS_ADDR: 0.0.0.0:8080
       # Stands in for the orchestrator until it drives this worker: something must load a
       # model before the memory service's first request. A DIP `load` still replaces it.
-      PRELOAD_MODEL: nomic-embed-text-v1.5
+      PRELOAD_MODEL: qwen3-embedding-0.6b
       EMBEDDING_THREADS: "4"
       EMBEDDING_LOG_LEVEL: info
     # No ports: Caddy fronts anything public, and the memory containers use the name.

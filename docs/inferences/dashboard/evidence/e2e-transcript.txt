@@ -1,0 +1,9 @@
+$ playwright test --workers=1
+
+Running 3 tests using 1 worker
+
+  ✓  1 [chromium] › e2e/decide.spec.ts:45:1 › paste, decide, correct, reload: the correction is still attached (1.0s)
+  ✓  2 [chromium] › e2e/decide.spec.ts:135:1 › the eval panel puts the model beside the majority-class baseline (378ms)
+  ✓  3 [chromium] › e2e/decide.spec.ts:155:1 › a correction is refused on screen when the prediction is already corrected elsewhere (471ms)
+
+  3 passed (3.3s)

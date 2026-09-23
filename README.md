@@ -13,6 +13,7 @@ nothing else.
 | [`services/inferences-ocr`](services/inferences-ocr/README.md) | Python | OCR worker. PP-OCRv5 (ja/en/zh) by default, plus tesseract and manga-ocr. ONNXRuntime only. | **this is the first worker** |
 | [`services/inferences-embedding`](services/inferences-embedding/README.md) | Python | Text embeddings: nomic-embed-text-v1.5 (en, default), EmbeddingGemma and Qwen3-Embedding (multilingual). DIP for lifecycle, TEI's `/embed` for vectors. | in review |
 | [`services/inferences-reranker`](services/inferences-reranker/README.md) | Python | Cross-encoder reranking: Qwen3-Reranker-0.6B (multilingual). DIP for lifecycle, TEI's `/rerank` for scores. | in review |
+| [`services/inferences-dashboard`](docs/inferences/dashboard/%5B1%5Dtechnical-requirement.md) | TypeScript | The SPA over the orchestrator: decide by hand, versioned schema templates, the accepted-vs-corrected capture, the eval panel. Loopback only until auth exists. | in review |
 | `services/inferences-stt` | Python | Speech to text. | placeholder |
 | `services/inferences-tts` | Python | Text to speech. | placeholder |
 

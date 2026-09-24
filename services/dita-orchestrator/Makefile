@@ -3,8 +3,8 @@ COVERAGE_OUT := coverage.out
 
 # `go test -cover` exits zero at any percentage, so the floor is enforced below. A tripwire,
 # not a target: set just under what the suite reaches. The chat handler, cmd and main have
-# no tests, which is most of what keeps it this low.
-COVERAGE_FLOOR := 54
+# no tests, which is most of what keeps it below the packages the gateway and store add.
+COVERAGE_FLOOR := 68
 
 .PHONY: help test coverage build image up down
 

@@ -73,6 +73,16 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	return cfg, nil
 }
 
+// Worker returns the configured worker called name.
+func (c Config) Worker(name string) (Worker, bool) {
+	for _, w := range c.Workers {
+		if w.Name == name {
+			return w, true
+		}
+	}
+	return Worker{}, false
+}
+
 // ServerWriteTimeout is the REST server's write deadline. It must outlast Timeout: the
 // server's own default of 30 s would cut a slow worker's answer off before the proxy's
 // timeout was ever reached.

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"dita-orchestrator/handler/chat"
+	"dita-orchestrator/handler/decisions"
 	"dita-orchestrator/handler/inferences"
 	"log/slog"
 	"net/http"
@@ -11,10 +12,11 @@ import (
 	"github.com/Wigata-Intech/w-tools/httpx/middleware"
 )
 
-// NewRouter builds the REST server on :2104. writeTimeout must outlast the slowest
-// proxied inference; see inferences.Config.ServerWriteTimeout.
-func NewRouter(logger *slog.Logger, chatHandler *chat.ChatHandler, gateway *inferences.Gateway, writeTimeout time.Duration) *httpx.Server {
-	srv := httpx.New(httpx.Config{Addr: ":2104", WriteTimeout: writeTimeout})
+// NewRouter builds the REST server on addr. writeTimeout must outlast the slowest proxied
+// inference; see inferences.Config.ServerWriteTimeout.
+func NewRouter(logger *slog.Logger, addr string, chatHandler *chat.ChatHandler, gateway *inferences.Gateway,
+	decisionsHandler *decisions.Handler, writeTimeout time.Duration) *httpx.Server {
+	srv := httpx.New(httpx.Config{Addr: addr, WriteTimeout: writeTimeout})
 
 	srv.Use(
 		middleware.RealIP(middleware.RealIPConfig{}),
@@ -37,6 +39,18 @@ func NewRouter(logger *slog.Logger, chatHandler *chat.ChatHandler, gateway *infe
 	inferencesAPI.Post("/decide", gateway.Decide)
 	inferencesAPI.Get("/workers", gateway.Workers)
 	inferencesAPI.Get("/health", gateway.Health)
+
+	inferencesAPI.Get("/schemas", decisionsHandler.Templates)
+	inferencesAPI.Post("/schemas", decisionsHandler.SaveTemplate)
+	inferencesAPI.Get("/schemas/{name}/versions", decisionsHandler.Versions)
+	inferencesAPI.Get("/schemas/{name}/versions/{version}", decisionsHandler.Template)
+	inferencesAPI.Post("/decisions", decisionsHandler.Decide)
+	inferencesAPI.Get("/decisions", decisionsHandler.Recent)
+	inferencesAPI.Get("/decisions/{id}", decisionsHandler.Decision)
+	inferencesAPI.Post("/decisions/{id}/correction", decisionsHandler.Correct)
+	inferencesAPI.Post("/evaluations", decisionsHandler.Evaluate)
+	inferencesAPI.Get("/evaluations", decisionsHandler.Evaluations)
+	inferencesAPI.Get("/stats", decisionsHandler.Stats)
 
 	return srv
 }

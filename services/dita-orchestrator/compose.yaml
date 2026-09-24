@@ -22,6 +22,11 @@ services:
       INFERENCES_SYSTEM_ONE_URL: http://inferences-system-one:8080
       # The reranker needs up to ~85 s for 32 pairs under load.
       INFERENCES_TIMEOUT: 120s
+      DECISIONS_DIR: /data/decisions
+    volumes:
+      # The training store: prediction and correction pairs, append-only. A named volume,
+      # so `compose down` and a redeploy keep it; only `down -v` would drop it, and must not.
+      - dita-decisions:/data/decisions
     # Loopback only: the gateway has no auth yet, so a host process may reach it and the LAN
     # may not. Caddy, on `proxy`, reaches it by name.
     ports:
@@ -30,6 +35,9 @@ services:
     cpus: 1.0
     networks:
       - proxy
+
+volumes:
+  dita-decisions:
 
 networks:
   proxy:

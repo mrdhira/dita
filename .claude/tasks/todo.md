@@ -110,3 +110,44 @@ Order: `~/.hermes/tmp/dita-order-inferences-gateway.md`. Branch `feat/inferences
 - **Not ours, but it fails `make test`**: the uncommitted `inferences-embedding/models.yaml`
   change makes Qwen the default, and `test_the_default_is_the_english_model_and_says_so` fails.
 - **Not verified**: `/decide` against a real system-one worker; the dashboard; auth.
+
+---
+
+# Task: `services/inferences-dashboard`
+
+Order: `~/.hermes/tmp/dita-order-inferences-dashboard.md`. Requirement:
+`~/second-brain/ai/dita/specs/inferences-dashboard-requirements.md` (followed, not redesigned).
+Branch `feat/inferences-dashboard`, stacked on `feat/inferences-gateway` (PR #14). Not pushed: the
+run said do NOT push, which overrides the order's push-and-PR.
+
+## Decisions taken up front
+- **The worker's answer shape is unsettled and Rin's branch has no commits**, so the orchestrator
+  owns a normalised decision contract and one adapter maps the worker's reply into it. The stub
+  speaks the documented shape; the raw reply is stored "as returned".
+- **The store is append-only JSONL files** (stdlib, CGO-free): templates, predictions, corrections
+  and evaluations, each written once. A second correction is refused by the store itself.
+- **Validation twice, proven equal**: Go and zod each implement the rules; one shared case file
+  (`specs/decisions/schema-cases.json`) runs through both suites.
+- **Majors as the order pins them**: React Router 7 and ESLint 9, not the newer 8 and 10.
+  TypeScript 6.0 because typescript-eslint supports `<6.1`.
+
+## Steps
+- [x] 1. Root plumbing: a marker-based JS unit class, nodejs + pnpm in `.tool-versions`, doctor.
+- [x] 2. Orchestrator: store, schema templates, decisions, corrections, evaluations, stats routes.
+- [x] 3. SPA: decide, templates, history, eval; the recommendation contract; failure states.
+- [x] 4. Build guard: `dist/` secret grep that fails the build.
+- [x] 5. Stub worker, Caddy block (loopback, full header set), e2e over the real store.
+- [x] 6. Docs and evidence screenshots under `docs/inferences/dashboard/`.
+
+## Review
+- **Built against a labelled stub**: Rin's branch has no commits, so `decisions/worker.go` holds the
+  documented stub contract and the e2e runs `e2e/stub-system-one.mjs`. Every screenshot says STUBBED.
+- **The pair holds**: the e2e reloads and reads the correction back from the store; the Go suite
+  reopens the directory and finds exactly one correction line after a refused second one.
+- **Mutation**: 15 of 16 on the store and routes (the survivor is the fsync, unobservable), 18 on the
+  gateway earlier. Two weak tests found and fixed (ECE binning, a non-compiling mutant rerun).
+- **Found on the way**: pnpm 12's minimum release age refused `prettier@3.9.9`; pinned 3.9.8 rather
+  than keep the exemption pnpm wrote. ESLint 9 is reported deprecated; kept, as the order pins it.
+  Playwright's teardown left the Caddy container running; a global teardown removes it.
+- **Not verified**: the real `inferences-system-one`; auth (it does not exist); latency p50/p95 and a
+  calibration drift line (need a metrics backend).

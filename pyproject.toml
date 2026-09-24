@@ -6,6 +6,8 @@ members = ["services/*", "packages/pylibs/*"]
 # placeholder becomes a real service, or it stays out of the lock silently.
 exclude = [
     "services/dita-orchestrator",
+    # A JS unit, classified by its package.json; never a uv member.
+    "services/inferences-dashboard",
     "services/inferences-stt",
     "services/inferences-tts",
 ]

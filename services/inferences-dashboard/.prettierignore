@@ -1,0 +1,7 @@
+dist
+coverage
+node_modules
+test-results
+playwright-report
+pnpm-lock.yaml
+sbom.cdx.json

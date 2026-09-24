@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"dita-orchestrator/decisions"
 	"dita-orchestrator/handler"
 	"dita-orchestrator/handler/chat"
+	decisionsHandler "dita-orchestrator/handler/decisions"
 	"dita-orchestrator/handler/inferences"
 	"fmt"
 	"log/slog"
@@ -51,15 +53,32 @@ func ServeRest() *cli.Command {
 				}
 				gateway := inferences.New(inferencesCfg, log.Slog())
 
+				// The training store: without it a decision could render and never be kept.
+				storeDir := envOr("DECISIONS_DIR", "/data/decisions")
+				store, err := decisions.Open(storeDir)
+				if err != nil {
+					return fmt.Errorf("decisions store at %s: %w", storeDir, err)
+				}
+				systemOne, _ := inferencesCfg.Worker(inferences.SystemOne)
+				decide := decisionsHandler.New(store, systemOne, inferencesCfg.Timeout, log.Slog())
+
+				addr := envOr("REST_ADDR", ":2104")
 				chatHndlr := chat.New(apiKey, log.Slog())
-				server := handler.NewRouter(log.Slog(), chatHndlr, gateway, inferencesCfg.ServerWriteTimeout())
-				log.Info(ctx, "REST run on :2104 - Ctrl-C to stop")
+				server := handler.NewRouter(log.Slog(), addr, chatHndlr, gateway, decide, inferencesCfg.ServerWriteTimeout())
+				log.Info(ctx, "REST run on "+addr+" - Ctrl-C to stop")
 				if err := server.Run(ctx); err != nil {
-					log.Error(ctx, "error when run rest", slog.String("addr", ":2104"))
+					log.Error(ctx, "error when run rest", slog.String("addr", addr))
 				}
 
 				return nil
 			},
 		}},
 	}
+}
+
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
 }

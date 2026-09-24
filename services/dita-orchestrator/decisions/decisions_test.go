@@ -47,13 +47,13 @@ func TestTheSharedSchemaCases(t *testing.T) {
 
 var triage = Draft{Name: "alert-triage", Questions: []Question{
 	{Name: "severity", Type: "choice", Options: []string{"low", "medium", "high"}},
-	{Name: "fraud", Type: "noul", Options: []string{"yes", "no"}},
+	{Name: "fraud", Type: "noul", Options: []string{"true", "false"}},
 }}
 
 // reply is what the stub worker answers for triage: medium, then no.
 var reply = []byte(`{"model_id":"stub","model_revision":"rev-1","answers":[
 	{"name":"severity","probabilities":{"low":0.2,"medium":0.7,"high":0.1},"confidence":0.7},
-	{"name":"fraud","probabilities":{"yes":0.4,"no":0.6},"confidence":0.6}]}`)
+	{"name":"fraud","probabilities":{"true":0.4,"false":0.6},"confidence":0.6}]}`)
 
 func predict(t *testing.T, s *Store, tpl Template) Prediction {
 	t.Helper()
@@ -77,14 +77,14 @@ func TestASecondCorrectionIsRefusedAndTheFirstStandsOnDisk(t *testing.T) {
 	tpl, _ := s.SaveTemplate(triage)
 	p := predict(t, s, tpl)
 
-	first, err := s.Correct(p.ID, map[string]string{"severity": "medium", "fraud": "yes"})
+	first, err := s.Correct(p.ID, map[string]string{"severity": "medium", "fraud": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := map[string]string{"severity": "accepted", "fraud": "corrected"}; !reflect.DeepEqual(first.Outcomes, want) {
 		t.Fatalf("outcomes %v, want %v", first.Outcomes, want)
 	}
-	_, err = s.Correct(p.ID, map[string]string{"severity": "low", "fraud": "no"})
+	_, err = s.Correct(p.ID, map[string]string{"severity": "low", "fraud": "false"})
 	if !errors.Is(err, ErrAlreadyCorrected) {
 		t.Fatalf("second correction: %v, want ErrAlreadyCorrected", err)
 	}
@@ -98,7 +98,7 @@ func TestASecondCorrectionIsRefusedAndTheFirstStandsOnDisk(t *testing.T) {
 	if err != nil || c == nil {
 		t.Fatalf("after reopening: %v %v", err, c)
 	}
-	if c.Answers["severity"] != "medium" || c.Answers["fraud"] != "yes" {
+	if c.Answers["severity"] != "medium" || c.Answers["fraud"] != "true" {
 		t.Fatalf("the first correction did not stand: %v", c.Answers)
 	}
 	// As returned means the worker's content, not its whitespace: JSON lines are compact.
@@ -127,10 +127,10 @@ func TestACorrectionIsCheckedAgainstTheVersionItWasMadeUnder(t *testing.T) {
 		answers map[string]string
 		err     error
 	}{
-		{"an option only the newer version has", map[string]string{"severity": "critical", "fraud": "no"}, ErrInvalid},
+		{"an option only the newer version has", map[string]string{"severity": "critical", "fraud": "false"}, ErrInvalid},
 		{"a question left out", map[string]string{"severity": "low"}, ErrInvalid},
 		{"an unknown prediction", nil, ErrNotFound},
-		{"every answer from the version it was made under", map[string]string{"severity": "high", "fraud": "no"}, nil},
+		{"every answer from the version it was made under", map[string]string{"severity": "high", "fraud": "false"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -203,9 +203,10 @@ func TestParseReplyRefusesAnAnswerToADifferentQuestion(t *testing.T) {
 		{"not JSON", "<html>", "not the expected JSON"},
 		{"no revision", ok(`{'answers':[]}`), "model_revision"},
 		{"a question missing", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':0.2,'medium':0.7,'high':0.1},'confidence':0.7}]}`), "answered 1 questions, 2 were asked"},
-		{"an option missing", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':0.3,'medium':0.7},'confidence':0.7},{'name':'fraud','probabilities':{'yes':0.4,'no':0.6},'confidence':0.6}]}`), "scored 2 options"},
-		{"a probability above 1", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':1.2,'medium':0.7,'high':0.1},'confidence':0.7},{'name':'fraud','probabilities':{'yes':0.4,'no':0.6},'confidence':0.6}]}`), "outside [0, 1]"},
-		{"no confidence", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':0.2,'medium':0.7,'high':0.1}},{'name':'fraud','probabilities':{'yes':0.4,'no':0.6},'confidence':0.6}]}`), "confidence"},
+		{"an option missing", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':0.3,'medium':0.7},'confidence':0.7},{'name':'fraud','probabilities':{'true':0.4,'false':0.6},'confidence':0.6}]}`), "scored 2 options"},
+		{"a probability above 1", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':1.2,'medium':0.7,'high':0.1},'confidence':0.7},{'name':'fraud','probabilities':{'true':0.4,'false':0.6},'confidence':0.6}]}`), "outside [0, 1]"},
+		{"no confidence", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':0.2,'medium':0.7,'high':0.1}},{'name':'fraud','probabilities':{'true':0.4,'false':0.6},'confidence':0.6}]}`), "confidence"},
+		{"an act_probability above 1", ok(`{'model_revision':'r','answers':[{'name':'severity','probabilities':{'low':0.2,'medium':0.7,'high':0.1},'confidence':0.7,'act_probability':1.5},{'name':'fraud','probabilities':{'true':0.4,'false':0.6},'confidence':0.6}]}`), "act_probability"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -223,6 +224,34 @@ func TestParseReplyRefusesAnAnswerToADifferentQuestion(t *testing.T) {
 	}
 	if got.Confidence["fraud"] != 0.6 {
 		t.Fatalf("confidence recomputed: %v", got.Confidence)
+	}
+}
+
+// systemOneReply is inferences-system-one's answer as it serves it: unrounded probabilities
+// that sum to 1, confidence the top probability, its escalate head beside them, and a noul
+// keyed false and true, the only labels that worker answers a noul in.
+var systemOneQuestions = []Question{
+	{Name: "severity", Type: "choice", Options: []string{"low", "medium", "high"}},
+	{Name: "needs_human", Type: "noul", Options: []string{"false", "true"}},
+}
+
+var systemOneReply = []byte(`{"model_id":"laya-multilingual","model_revision":"b4a904d1a2a54c822b829e24291d4b8f280fe43e",
+	"answers":[{"name":"severity","probabilities":{"low":0.011218,"medium":0.850674,"high":0.138108},"confidence":0.850674,"act_probability":0.9999},
+	{"name":"needs_human","probabilities":{"true":0.017179,"false":0.982821},"confidence":0.982821,"act_probability":1}]}`)
+
+func TestParseReplyReadsTheSystemOneWorkersAnswer(t *testing.T) {
+	got, err := ParseReply(systemOneReply, systemOneQuestions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ModelID != "laya-multilingual" || got.ModelRevision != "b4a904d1a2a54c822b829e24291d4b8f280fe43e" {
+		t.Fatalf("model %q at %q", got.ModelID, got.ModelRevision)
+	}
+	if o := got.Answers[0].Options; o[0].Option != "medium" || o[0].Probability != 0.850674 || o[2].Option != "low" {
+		t.Fatalf("severity not every option best first: %+v", o)
+	}
+	if got.Confidence["severity"] != 0.850674 || got.Confidence["needs_human"] != 0.982821 {
+		t.Fatalf("confidence not as served: %v", got.Confidence)
 	}
 }
 
@@ -293,4 +322,27 @@ func read(t *testing.T, dir, name string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestCriteriaReachTheWorkerAsWritten(t *testing.T) {
+	asked := DecideRequest{Text: "oom", Questions: []Question{
+		{Name: "severity", Type: "choice", Options: []string{"info", "critical"}, Criteria: "How severe is this alert?"},
+		{Name: "needs_human", Type: "noul", Options: []string{"false", "true"}},
+	}}
+	body, err := json.Marshal(asked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent struct {
+		Questions []map[string]any `json:"questions"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Questions[0]["criteria"]; got != "How severe is this alert?" {
+		t.Fatalf("criteria sent as %v", got)
+	}
+	if _, present := sent.Questions[1]["criteria"]; present {
+		t.Fatalf("an empty criteria must be omitted, the worker then falls back to the name: %s", body)
+	}
 }

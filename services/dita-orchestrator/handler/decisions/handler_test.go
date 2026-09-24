@@ -21,11 +21,11 @@ import (
 
 const stubReply = `{"model_id":"stub-system-one","model_revision":"STUB-not-a-model","answers":[
 	{"name":"severity","probabilities":{"low":0.15,"medium":0.25,"high":0.6},"confidence":0.6},
-	{"name":"fraud","probabilities":{"yes":0.3,"no":0.7},"confidence":0.7}]}`
+	{"name":"fraud","probabilities":{"true":0.3,"false":0.7},"confidence":0.7}]}`
 
 var draft = `{"name":"alert-triage","description":"","questions":[
 	{"name":"severity","type":"choice","options":["low","medium","high"]},
-	{"name":"fraud","type":"noul","options":["yes","no"]}]}`
+	{"name":"fraud","type":"noul","options":["true","false"]}]}`
 
 type env struct {
 	t      *testing.T
@@ -161,7 +161,7 @@ func TestPasteDecideCorrectReload(t *testing.T) {
 		t.Fatalf("new prediction %v", made)
 	}
 
-	code, corrected, body := e.call("POST", "/decisions/"+id+"/correction", `{"answers":{"severity":"high","fraud":"yes"}}`)
+	code, corrected, body := e.call("POST", "/decisions/"+id+"/correction", `{"answers":{"severity":"high","fraud":"true"}}`)
 	if code != 201 {
 		t.Fatalf("correct: %d %s", code, body)
 	}
@@ -169,7 +169,7 @@ func TestPasteDecideCorrectReload(t *testing.T) {
 	if outcomes["severity"] != "accepted" || outcomes["fraud"] != "corrected" {
 		t.Fatalf("outcomes %v", outcomes)
 	}
-	code, _, body = e.call("POST", "/decisions/"+id+"/correction", `{"answers":{"severity":"low","fraud":"no"}}`)
+	code, _, body = e.call("POST", "/decisions/"+id+"/correction", `{"answers":{"severity":"low","fraud":"false"}}`)
 	if code != 409 || !strings.Contains(body, "the first stands") {
 		t.Fatalf("second correction: %d %s", code, body)
 	}
@@ -178,7 +178,7 @@ func TestPasteDecideCorrectReload(t *testing.T) {
 	reloaded := newEnv(t, dir, up)
 	_, got, _ := reloaded.call("GET", "/decisions/"+id, "")
 	c, _ := got["correction"].(map[string]any)
-	if c == nil || c["answers"].(map[string]any)["severity"] != "high" || c["answers"].(map[string]any)["fraud"] != "yes" {
+	if c == nil || c["answers"].(map[string]any)["severity"] != "high" || c["answers"].(map[string]any)["fraud"] != "true" {
 		t.Fatalf("after reload the correction is %v", got["correction"])
 	}
 	_, recent, _ := reloaded.call("GET", "/decisions?limit=5", "")

@@ -1,0 +1,36 @@
+# The orchestrator on the shared `proxy` network, so it reaches the inference workers by
+# container name: they publish no ports, and nothing off that network can resolve them.
+# `make up` from this directory.
+name: dita-orchestrator
+
+services:
+  dita-orchestrator-rest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dita-orchestrator:local
+    # The same name deployment/docker-compose.yml uses: the two are alternatives, and a
+    # fixed name makes running both at once fail loudly rather than split the port.
+    container_name: dita-orchestrator-rest
+    command: ["serveRest"]
+    restart: unless-stopped
+    environment:
+      # serveRest refuses to start without it; /api/v1/chat is the only route that uses it.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
+      INFERENCES_EMBEDDING_URL: http://inferences-embedding:8080
+      INFERENCES_RERANKER_URL: http://inferences-reranker:8080
+      INFERENCES_SYSTEM_ONE_URL: http://inferences-system-one:8080
+      # The reranker needs up to ~85 s for 32 pairs under load.
+      INFERENCES_TIMEOUT: 120s
+    # Loopback only: the gateway has no auth yet, so a host process may reach it and the LAN
+    # may not. Caddy, on `proxy`, reaches it by name.
+    ports:
+      - "127.0.0.1:2104:2104"
+    mem_limit: 256m
+    cpus: 1.0
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

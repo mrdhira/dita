@@ -4,6 +4,8 @@ import (
 	"context"
 	"dita-orchestrator/handler"
 	"dita-orchestrator/handler/chat"
+	"dita-orchestrator/handler/inferences"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -43,8 +45,14 @@ func ServeRest() *cli.Command {
 					panic("DEEPSEEK_API_KEY cannot be empty")
 				}
 
+				inferencesCfg, err := inferences.ConfigFromEnv(os.Getenv)
+				if err != nil {
+					return fmt.Errorf("inferences gateway config: %w", err)
+				}
+				gateway := inferences.New(inferencesCfg, log.Slog())
+
 				chatHndlr := chat.New(apiKey, log.Slog())
-				server := handler.NewRouter(log.Slog(), chatHndlr)
+				server := handler.NewRouter(log.Slog(), chatHndlr, gateway, inferencesCfg.ServerWriteTimeout())
 				log.Info(ctx, "REST run on :2104 - Ctrl-C to stop")
 				if err := server.Run(ctx); err != nil {
 					log.Error(ctx, "error when run rest", slog.String("addr", ":2104"))

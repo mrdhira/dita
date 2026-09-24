@@ -25,6 +25,10 @@ GO_PKGS := $(filter packages/golibs/%,$(GO_UNITS))
 PY_ALLOW_worker := --allow yaml
 PY_ALLOW_textinfer := --allow numpy,onnxruntime
 
+# The orchestrator's CLI, HTTP server and logger are w-tools, a choice that predates the
+# gateway; named here, like the Python allowances, so it stays a decision.
+GO_ALLOW_dita-orchestrator := ^github.com/Wigata-Intech/w-tools/
+
 # Which halves of the dependency gate this branch can actually run.
 VERIFY_HALVES := $(strip $(if $(GO_UNITS),go-verify) $(if $(PY_PKGS),py-verify))
 TEST_GATE := $(if $(VERIFY_HALVES),dip-verify)
@@ -158,22 +162,28 @@ dip-verify: $(VERIFY_HALVES)
 # which arrives with `import "net"`) count as stdlib rather than third-party.
 # go list's status is captured on its own line: `|| true` here would also swallow its
 # failure and report "stdlib only" for a check that never ran.
+# $(1) is an extended regex of allowed import paths, or empty. A module's own packages are
+# first-party whatever its path is.
 define go_third_party
 	deps=$$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./... 2>&1) || { \
 		echo "  CANNOT VERIFY: go list failed"; printf '%s\n' "$$deps" | sed 's/^/    /'; \
 		exit 1; \
 	}; \
-	out=$$(printf '%s\n' "$$deps" | grep -v '^github.com/mrdhira/dita/' | grep -v '^$$' || true); \
+	own=$$(go list -m); \
+	out=$$(printf '%s\n' "$$deps" | grep -v '^github.com/mrdhira/dita/' \
+		| grep -v -x -e "$$own" | grep -v "^$$own/" $(if $(1),| grep -v -E '$(1)') \
+		| grep -v '^$$' || true); \
 	if [ -n "$$out" ]; then printf '%s\n' "$$out" | sed 's/^/  THIRD-PARTY: /'; exit 1; fi; \
-	echo "  stdlib only"
+	echo "  stdlib only$(if $(1), plus $(1))"
 endef
 
+# foreach, not a shell loop: the allowance is per-module make data.
 go-verify:
 	@$(if $(GO_UNITS),:,echo "no Go modules to verify on this branch")
-	@for unit in $(GO_UNITS); do \
-		echo "== $$unit: go list -deps"; \
-		(cd $$unit && $(go_third_party)) || exit $$?; \
-	done
+	@$(foreach unit,$(GO_UNITS), \
+		echo "== $(unit): go list -deps"; \
+		(cd $(unit) && $(call go_third_party,$(GO_ALLOW_$(notdir $(unit))))) || exit $$?; \
+	)
 
 # foreach, not a shell loop: the allowance is per-package make data.
 py-verify:

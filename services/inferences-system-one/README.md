@@ -47,7 +47,8 @@ curl -s http://inferences-system-one:8080/decide -H 'Content-Type: application/j
   model answers one. A template whose noul says `yes`/`no` is refused with a 400, never guessed at.
 - `criteria` is the model's instructions for that question. Without it the question's name is
   the only text that says what is asked, so it is used instead; write criteria.
-- `range` is refused: the model reads a score's options as its levels, in order, and cannot read a range.
+- `range` on a score is accepted and ignored: the model reads a score's options as its levels, in
+  order. It is refused only when it contradicts those options (numeric levels out of order or outside it).
 - `act_probability` is the model's escalate head. On this checkpoint it is 1.0 for every input
   measured (its logits sit near ±1500), so it carries no signal yet.
 - One request at a time. The worker's own refusals carry a JSON body `{"error", "error_type"}`:

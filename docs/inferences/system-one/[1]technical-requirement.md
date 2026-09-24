@@ -52,9 +52,12 @@ in the orchestrator moves.
 - A `noul` question's options are exactly `false` and `true`, in either order. The model answers a noul in no
   other terms, so the worker refuses anything else (400) and `ValidateDraft` refuses such a template
   (`specs/decisions/schema-cases.json` holds both sides to it).
-- `range` is refused (400). The model reads a `score` question's options as its levels, in order (`level 0:
-  <first option>`, …), and has no way to read a numeric range; accepting and discarding it would let a caller
-  believe it mattered.
+- `range` is accepted on a `score` question and ignored: the model reads a score's options as its levels, in
+  order (`level 0: <first option>`, …), and never sees the range. Dita's template schema defines it and the
+  dashboard's editor emits it, so its presence never fails a request. It is refused (400) only when it
+  contradicts its own options: on a question that is not a score, when it is not two numbers with min below
+  max, or when numeric options are out of order or outside min..max. Options that are not numbers cannot
+  contradict a range.
 
 Reply — deliberately the shape `services/dita-orchestrator/decisions/worker.go` already documents and parses
 (`workerReply` / `workerAnswer`). That file is the placeholder the orchestrator wrote *for this worker*, so

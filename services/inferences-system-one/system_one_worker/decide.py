@@ -30,7 +30,7 @@ MAX_PLANNED_TOKENS = 8192
 TYPES = ("choice", "score", "noul")
 NOUL_OPTIONS = ("false", "true")
 FIELDS = frozenset({"text", "questions"})
-QUESTION_FIELDS = frozenset({"name", "type", "options", "criteria"})
+QUESTION_FIELDS = frozenset({"name", "type", "options", "criteria", "range"})
 
 
 class Refusal(Exception):
@@ -129,9 +129,6 @@ def _check_question(index: int, q: Any) -> None:
     at = f"questions[{index}]"
     if not isinstance(q, dict):
         raise Refusal(f"{at} must be an object")
-    if "range" in q:
-        raise Refusal(f"{at}.range means nothing to this model, which reads a score's options as "
-                      "its levels in order; send the levels as options and drop the range")
     unknown = sorted(set(q) - QUESTION_FIELDS)
     if unknown:
         raise Refusal(f"{at} has unknown field(s): {', '.join(unknown)}")
@@ -150,6 +147,29 @@ def _check_question(index: int, q: Any) -> None:
                       f"so its options must be exactly those, not {options}")
     if "criteria" in q and not isinstance(q["criteria"], str):
         raise Refusal(f"{at}.criteria must be a string")
+    if q.get("range") is not None:
+        _check_range(at, q)
+
+
+def _check_range(at: str, q: Dict[str, Any]) -> None:
+    """The model reads a score's options as its levels in order and never sees the range, so a
+    range is accepted and ignored. It is refused only when it contradicts its own options."""
+    if q["type"] != "score":
+        raise Refusal(f"{at}.range belongs only to a score question")
+    bounds = q["range"]
+    if not isinstance(bounds, dict) or not all(
+            isinstance(bounds.get(k), (int, float)) and not isinstance(bounds.get(k), bool) for k in ("min", "max")):
+        raise Refusal(f"{at}.range must be {{min, max}} numbers")
+    low, high = bounds["min"], bounds["max"]
+    if not low < high:
+        raise Refusal(f"{at}.range min must be below max")
+    try:
+        levels = [float(o) for o in q["options"]]
+    except ValueError:
+        return
+    if levels != sorted(levels) or levels[0] < low or levels[-1] > high:
+        raise Refusal(f"{at}.range {low}..{high} contradicts its options {q['options']}: numeric levels must "
+                      "rise within the range")
 
 
 def to_model(q: Mapping[str, Any]) -> Dict[str, Any]:

@@ -146,6 +146,23 @@ class DecideEndpointTest(unittest.TestCase):
                 self.assertAlmostEqual(a["confidence"], confidence_from_probs(p, len(p)), places=12)
                 self.assertLess(a["confidence"], max(a["probabilities"].values()), "not the top probability")
 
+    def test_the_dashboards_template_with_a_score_range_is_answered(self) -> None:
+        """The e2e that found the defect: the dashboard's template, as the orchestrator sends it."""
+        template = {"text": "oom restart restart", "questions": [
+            {"name": "severity", "type": "choice", "options": ["low", "medium", "high", "critical"]},
+            {"name": "fraud", "type": "noul", "options": ["false", "true"]},
+            {"name": "risk_score", "type": "score", "options": ["1", "2", "3", "4", "5"],
+             "range": {"min": 1, "max": 5}}]}
+        status, _, answer = self.worker.http("POST", "/decide", template)
+        self.assertEqual(status, 200, answer)
+        risk = answer["answers"][2]
+        self.assertEqual((risk["name"], list(risk["probabilities"])), ("risk_score", ["1", "2", "3", "4", "5"]))
+        self.assertAlmostEqual(sum(risk["probabilities"].values()), 1.0, delta=1e-9)
+        contradicted = {**template, "questions": [{**template["questions"][2], "range": {"min": 1, "max": 3}}]}
+        status, _, body = self.worker.http("POST", "/decide", contradicted)
+        self.assertEqual((status, body["error_type"]), (400, "Validation"))
+        self.assertIn("contradicts its options", body["error"])
+
     def test_the_answer_is_the_models_not_a_constant(self) -> None:
         other = {**ALERT, "text": "disk ok"}
         first = self.worker.http("POST", "/decide", ALERT)[2]["answers"][0]["probabilities"]

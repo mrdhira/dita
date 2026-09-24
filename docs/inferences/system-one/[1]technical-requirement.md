@@ -46,29 +46,63 @@ in the orchestrator moves.
                 "criteria": "…optional instructions…"}]}
 ```
 
-Reply
+- `criteria` is what the model reads as the question's instructions. Without it the model sees only the
+  question's name with underscores as spaces. The orchestrator's `decisions.Question` carries it
+  (`omitempty`), so a template's criteria reach the worker unchanged.
+- A `noul` question's options are exactly `false` and `true`, in either order. The model answers a noul in no
+  other terms, so the worker refuses anything else (400) and `ValidateDraft` refuses such a template
+  (`specs/decisions/schema-cases.json` holds both sides to it).
+- `range` is refused (400). The model reads a `score` question's options as its levels, in order (`level 0:
+  <first option>`, …), and has no way to read a numeric range; accepting and discarding it would let a caller
+  believe it mattered.
+
+Reply — deliberately the shape `services/dita-orchestrator/decisions/worker.go` already documents and parses
+(`workerReply` / `workerAnswer`). That file is the placeholder the orchestrator wrote *for this worker*, so
+implementing its documented shape keeps the adapter's change to the additive `act_probability` field and
+leaves its fixtures and the dashboard's contract untouched.
 
 ```json
 {"model_id": "laya-multilingual",
  "model_revision": "<the HF revision in models.yaml>",
- "answers": [{"name": "severity", "type": "choice",
-              "options": [{"option": "warning", "probability": 0.8507},
-                          {"option": "critical", "probability": 0.1381},
-                          {"option": "info", "probability": 0.0112}],
+ "answers": [{"name": "severity",
+              "probabilities": {"info": 0.0112, "warning": 0.8507, "critical": 0.1381},
               "confidence": 0.5801,
               "act_probability": 1.0}]}
 ```
 
 Rules the adapter and the dashboard may rely on:
 
-- Every option of the question appears, `probability` sums to 1 within 1e-6, ordered best first.
-- `type: "noul"` (the model's boolean question) answers as options `false` and `true`.
-- `confidence` is the top probability after temperature; `act_probability` is the model's own escalate head
-  (index 0 of its two-way softmax) — reported, never used to override an answer in v1.
+- Every option of the question appears as a key. The worker guarantees the values sum to 1 within 1e-12 (the
+  final softmax is in float64); `ParseReply` does not check the sum, so nothing downstream should treat it as
+  enforced by the adapter. The orchestrator orders the options best first itself (`Answer.Options`).
+- `type: "noul"` (the model's boolean question) answers with the keys `false` and `true`.
+- `confidence` is the model's own measure, upstream's `confidence_from_probs`: 1 minus the entropy of the
+  answer distribution (after temperature) divided by log(k), for k options. It is 1 for a certain answer and 0
+  for a uniform one, and it is not the top probability: the example's 0.5801 sits beside a top of 0.8507.
+  Upstream emits none for a noul; this worker computes the same function with k = 2, so the field is never
+  absent.
+- `act_probability` is the model's own escalate head (index 0 of its two-way softmax), reported and never
+  used to override an answer in v1. On `laya-multilingual` its logits sit near ±1500, so it is 1.0 for every
+  input measured.
 - An answer that does not cover every asked question is an error, not a partial reply. The orchestrator
   refuses to store a reply it cannot match (`ParseReply`).
-- `GET /info` reports `model_id`, `model_revision`, `engine`; `GET /health` is 503 until a model is resident;
-  `GET /metrics` is Prometheus, on the same port as the routes.
+- `GET /info` reports `model_id`, `model_revision`, `engine` and the bounds below; `GET /health` is 503 until a
+  model is resident; `GET /metrics` is Prometheus, on the same port as the routes.
+
+Bounds. One request is inside the model at a time; a second is refused with 429 at once, because behind the
+model's single lock a second slot would only be a queue. A request whose planned work cannot finish in time is
+refused with 413 before the encoder runs: the planned work is the padded tokens of its encoder batches
+(questions grouped two at a time at `max_len`), and the limit is 8192. The derivation: 20 questions at 1024
+tokens (20480 padded tokens) took 169.5 s on this host at load average 13.8, 8.3 ms a token; 8192 tokens is
+about 68 s at that rate, inside a 100 s deadline that is itself inside the orchestrator's 120 s
+`INFERENCES_TIMEOUT`. The deadline is checked before every encoder batch; a request that passes it stops there
+and is answered 504 with how many batches were done, and never with a partial reply. Twenty questions at the
+limit are 20480 tokens, so a template's size and its text's length together decide whether it is served.
+
+The temperatures are the ones upstream reads: `rl_agent_config.json`'s `temperature` and
+`temperature_by_options`. The checkpoint also carries a `temperature` buffer that upstream ignores; the worker
+refuses to load a checkpoint whose buffer and config disagree, because then nobody can say which calibration is
+intended.
 
 ## Design
 
@@ -112,4 +146,9 @@ Rules the adapter and the dashboard may rely on:
 - Quality: on a real alert both runtimes call an OOM crash loop a `warning` that needs no human. Until labels
   exist, this worker is a *shadow* predictor, not a gate.
 - Whether `act_probability` should be stored and shown as the dashboard's "spawn AI or a human" signal, or
-  kept in the payload only.
+  kept in the payload only. On this checkpoint it is a constant 1.0, so not yet.
+- `criteria` means two things. In this contract it is the question's instructions; in upstream it is the
+  per-option descriptions (choice `{option: description}`, noul `{true, false}`), which the model supports and
+  this contract cannot pass. Proposed: rename the contract's field to `instructions` and add optional option
+  descriptions. Not done here, because the rename moves stored templates, the template editor and the
+  dashboard's schema.

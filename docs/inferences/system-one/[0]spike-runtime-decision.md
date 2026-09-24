@@ -250,3 +250,21 @@ the ONNX and computing in fp32 would halve the image. I did not measure that.
 
 I did not check how well the uncalibrated probabilities match reality on our alerts. Both runtimes agree that the
 real alert is a `warning` with `needs_human` at 0.0172, and that looks wrong for an OOM crash loop.
+
+## Decisions recorded after the spike (Dhira, 2026-09-25)
+
+1. **The ONNX artifact is produced in the build stage, not vendored.** A multi-stage build runs the export
+   with torch present in the builder stage; the runtime stage keeps the rule the embedding README states
+   (onnxruntime and tokenizers, no torch). Nothing is committed and nothing is downloaded from a third party.
+2. **Publishing the artifact is deferred tech debt, deliberately.** When it is picked up: re-export in fp16
+   with fused attention (1.2 GB to about 644 MB), re-verify parity, publish to a HuggingFace repo
+   `laya-multilingual-system-one-onnx` under a namespace Dhira chooses, with a model card naming the upstream
+   repo `convaiinnovations/laya-multilingual` at revision `b4a904d1a2a54c822b829e24291d4b8f280fe43e`, its
+   apache-2.0 licence, the changes made, the parity numbers and the artifact sha256. Then pin it in
+   `models.yaml` and delete the export step. This needs a write token placed at
+   `~/.hermes/credentials/hf-token` — never pasted into a chat.
+3. **Item 2 is what closes item 1.** An export step is slower and weaker evidence than a pinned download
+   with a sha256; the build stage is the interim, not the resting place.
+
+Still open, and not a decision for this document: where the service is reachable from (loopback publish, a
+Caddy hostname, or a route through the orchestrator's REST). That is Dita's call, since exposure is hers.

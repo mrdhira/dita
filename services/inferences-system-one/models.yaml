@@ -1,0 +1,48 @@
+# Weights are never committed: every file is pinned to an immutable revision and a sha256
+# computed from a real download, and the fetcher refuses anything else. These pin the
+# export's *inputs*: the encoder graph is built from them in the image's builder stage.
+
+version: 1
+default_model: laya-multilingual
+
+models:
+  - id: laya-multilingual
+    description: >-
+      convaiinnovations/laya-multilingual (Apache-2.0): mmBERT-base encoder plus a decision
+      head, 100+ languages. Ships uncalibrated (every temperature 1.0), so its probabilities
+      are over-confident until temperatures are fitted on our own labels.
+    engine: onnx_decision
+    langs: [multilingual]
+    source:
+      type: huggingface
+      repo: convaiinnovations/laya-multilingual
+      revision: b4a904d1a2a54c822b829e24291d4b8f280fe43e
+    files:
+      - path: model.safetensors
+        # Anchored: the engine refuses an encoder graph not exported from exactly these bytes.
+        sha256: &weights 9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204
+        bytes: 643835514
+      - path: tokenizer/tokenizer.json
+        sha256: 609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f
+        bytes: 34363188
+      - path: tokenizer/tokenizer_config.json
+        sha256: 424b69444bf7b5809dc2cd2e36d0bd71b8055124dd24274d6db3c655d38205e7
+        bytes: 502
+      # max_len, head_max_len, head_layers and the temperatures: the checkpoint's, not ours.
+      - path: rl_agent_config.json
+        sha256: 25061739243b617ad88d1219ba6f8a9c86c5881ca28df024fa2d9b3b2fcc30c6
+        bytes: 472
+      # The export builds the encoder from it; the engine checks the head's split against it.
+      - path: encoder/config.json
+        sha256: 83f6916d13ef0f556ac461f28308dc2bffa7ebeadee8ec9e2db5812020ea5bb4
+        bytes: 1938
+    options:
+      onnx: encoder.onnx
+      weights: model.safetensors
+      config: rl_agent_config.json
+      encoder_config: encoder/config.json
+      tokenizer: tokenizer/tokenizer.json
+      tokenizer_config: tokenizer/tokenizer_config.json
+      encoder_built_from: *weights
+      # Two max_len questions per encoder call: the spike's measured 1.7 GB peak.
+      max_batch_tokens: 2048

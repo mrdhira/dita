@@ -1,0 +1,51 @@
+# Its own stack, so the orchestrator reaches it by name on the shared `proxy` network.
+# `make up` from this directory. Run on the host that owns ../../run and ./models.
+name: inferences-system-one
+
+services:
+  inferences-system-one:
+    build:
+      context: ../..
+      dockerfile: services/inferences-system-one/Dockerfile
+    image: dita-inferences-system-one:local
+    container_name: inferences-system-one
+    restart: unless-stopped
+    environment:
+      MODELS_DIR: /models
+      SOCKET_PATH: /run/dita/inferences-system-one.sock
+      # /decide, /info and /health, beside /metrics. Reachable only on `proxy`.
+      METRICS_ADDR: 0.0.0.0:8080
+      # Stands in for the orchestrator until it drives this worker over DIP.
+      PRELOAD_MODEL: laya-multilingual
+      SYSTEM_ONE_THREADS: "4"
+      SYSTEM_ONE_LOG_LEVEL: info
+    # No ports: the orchestrator uses the name; host-side callers go through its REST.
+    expose:
+      - "8080"
+    volumes:
+      # The checkpoint the head reads, fetched on first load and verified by sha256. The encoder
+      # graph is in the image, exported from the same bytes at build time.
+      - ./models:/models
+      - ../../run:/run/dita
+    # Measured in this container: 1.63 GB cgroup peak on 20 questions at the 1024-token limit
+    # (batches of two, max_batch_tokens 2048); 1.45 GB after the preload.
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 4
+    # The bind mounts belong to the invoking user; the image's own uid 10001 could not write them.
+    user: "${UID:-1000}:${GID:-1000}"
+    healthcheck:
+      # /health is 503 until a model is resident: a failed preload must not look healthy.
+      test: ["CMD", "python", "-c", "import sys, urllib.request as u; sys.exit(u.urlopen('http://127.0.0.1:8080/health', timeout=5).status != 200)"]
+      # The preload (a 680 MB fetch on a cold volume, then graph optimisation) runs before the
+      # socket binds.
+      start_period: 300s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

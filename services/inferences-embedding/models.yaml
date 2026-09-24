@@ -3,7 +3,7 @@
 # in docs/inferences/embedding/[1]technical-requirement.md#data-model.
 
 version: 1
-default_model: nomic-embed-text-v1.5
+default_model: qwen3-embedding-0.6b
 
 models:
   - id: nomic-embed-text-v1.5
@@ -96,17 +96,18 @@ models:
       repo: onnx-community/Qwen3-Embedding-0.6B-ONNX
       revision: c25a394dd583836952667c12f008335071b3f43d
     files:
-      - path: onnx/model.onnx
-        sha256: bf27b2f3f9ef9c32ca337d75b361fa99439deaeaefe82e4701b2dbd8439197cc
-        bytes: 307161415
-      - path: onnx/model.onnx_data
-        sha256: f0a61604465929a27e68aa6217c8c89ec6186572f0209fdb7711adda48a9b9a9
-        bytes: 2093436928
+      # int8 export: same repo, SAME revision and same tokenizer as the fp32 build, one file
+      # instead of two. Not a speed choice - int8 buys only 10-34% on this avx2-only CPU (no
+      # VNNI) - it is a RAM choice: measured 903 MB resident after load and 1,006 MB peak on a
+      # 256-token item, against ~4 GB for the fp32 export at 2048 tokens.
+      - path: onnx/model_int8.onnx
+        sha256: 6d0ea863f78b4a84afa3c7fcba1ec341572b5e28121aef77b7092b1dfdf679c7
+        bytes: 613527539
       - path: tokenizer.json
         sha256: def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a
         bytes: 11423705
     options:
-      onnx: onnx/model.onnx
+      onnx: onnx/model_int8.onnx
       tokenizer: tokenizer.json
       pad_token: "<|endoftext|>"
       output: last_hidden_state

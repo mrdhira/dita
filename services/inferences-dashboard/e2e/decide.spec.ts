@@ -1,15 +1,23 @@
 import { mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import type { Decision } from "../src/api/client";
+import { STUB_LABELS, pinnedModel, realWorkerUrl } from "./worker";
 
 // The scenario the requirement names, because it catches the likeliest bug: losing the pair.
 // paste -> decide -> correct -> reload -> the correction is still attached to its prediction.
+// It runs against the stub by default and against the real worker when E2E_SYSTEM_ONE_URL is set.
+
+const real = realWorkerUrl !== undefined;
+const mode = real ? "real" : "stubbed";
+// The real worker takes seconds per question; the stub answers at once.
+const answered = { timeout: real ? 150_000 : 5_000 };
+test.describe.configure({ timeout: real ? 300_000 : 30_000 });
 
 const evidence = "../../docs/inferences/dashboard/evidence";
 mkdirSync(evidence, { recursive: true });
 
-// Every screenshot here shows the stub, so every one says so on the page itself.
-async function labelStubbed(page: Page, what: string) {
+// Every screenshot that shows something other than a real answer says so on the page itself.
+async function label(page: Page, text: string) {
   await page.evaluate((text) => {
     const label = document.createElement("div");
     label.textContent = text;
@@ -24,7 +32,11 @@ async function labelStubbed(page: Page, what: string) {
       font: "600 13px system-ui",
     });
     document.body.appendChild(label);
-  }, `STUBBED: ${what}`);
+  }, text);
+}
+
+async function expectNoStubLabels(page: Page) {
+  for (const stub of STUB_LABELS) await expect(page.locator("body")).not.toContainText(stub);
 }
 
 const template = {
@@ -32,7 +44,7 @@ const template = {
   description: "Alert triage, for the e2e",
   questions: [
     { name: "severity", type: "choice", options: ["low", "medium", "high", "critical"] },
-    { name: "fraud", type: "noul", options: ["yes", "no", "unknown"] },
+    { name: "fraud", type: "noul", options: ["false", "true"] },
     {
       name: "risk_score",
       type: "score",
@@ -52,6 +64,18 @@ test("paste, decide, correct, reload: the correction is still attached", async (
   });
   page.on("pageerror", (e) => problems.push(e.message));
 
+  const pinned = real ? pinnedModel() : undefined;
+  if (realWorkerUrl && pinned) {
+    const info = (await (await request.get(`${realWorkerUrl}/info`)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(info, "the worker serves the model models.yaml pins").toMatchObject({
+      model_id: pinned.id,
+      model_revision: pinned.revision,
+    });
+  }
+
   const saved = await request.post("/api/inferences/schemas", { data: template });
   expect(saved.status()).toBe(201);
 
@@ -67,7 +91,7 @@ test("paste, decide, correct, reload: the correction is still attached", async (
   await page.getByRole("combobox", { name: "Schema template" }).selectOption("alert-triage@1");
   await page.getByRole("button", { name: "Decide" }).click();
 
-  await expect(page).toHaveURL(/\/decisions\/[0-9a-f]{24}$/);
+  await expect(page).toHaveURL(/\/decisions\/[0-9a-f]{24}$/, answered);
   const id = page.url().split("/").pop() ?? "";
   for (const question of ["severity", "fraud", "risk_score"]) {
     const card = page.getByRole("region", { name: `suggestion for ${question}` });
@@ -75,9 +99,25 @@ test("paste, decide, correct, reload: the correction is still attached", async (
     await expect(card.getByTestId("top-2")).toContainText("%");
     await expect(card.getByTestId("confidence")).toContainText("%");
   }
-  await expect(page.getByText("STUB-not-a-model")).toBeVisible();
-  await labelStubbed(page, "worker is a stub, not a model (inferences-system-one is not merged)");
-  await page.screenshot({ path: `${evidence}/1-answer-view-stubbed.png`, fullPage: true });
+  const predicted = (await (
+    await request.get(`/api/inferences/decisions/${id}`)
+  ).json()) as Decision;
+  if (pinned) {
+    expect(predicted.model_id).toBe(pinned.id);
+    expect(predicted.model_revision).toBe(pinned.revision);
+    await expect(page.getByText(pinned.revision)).toBeVisible();
+    for (const a of predicted.answers) {
+      const sum = a.options.reduce((s, o) => s + o.probability, 0);
+      expect(Math.abs(sum - 1), `${a.question} sums to ${sum}`).toBeLessThanOrEqual(1e-6);
+    }
+    const fraudAnswer = predicted.answers.find((a) => a.question === "fraud");
+    expect(fraudAnswer?.options.map((o) => o.option).sort()).toEqual(["false", "true"]);
+    await expectNoStubLabels(page);
+  } else {
+    await expect(page.getByText("STUB-not-a-model")).toBeVisible();
+    await label(page, "STUBBED: worker is a stub, not a model");
+  }
+  await page.screenshot({ path: `${evidence}/1-answer-view-${mode}.png`, fullPage: true });
 
   const severityTop =
     (
@@ -95,7 +135,7 @@ test("paste, decide, correct, reload: the correction is still attached", async (
         .getByTestId("top-1")
         .textContent()
     )?.split(" · ")[0] ?? "";
-  const fraudOther = ["yes", "no", "unknown"].find((o) => o !== fraudTop) ?? "yes";
+  const fraudOther = fraudTop === "true" ? "false" : "true";
   await fraud.getByRole("radio", { name: fraudOther }).check();
   await page
     .getByRole("button", { name: /use suggestion/ })
@@ -108,8 +148,11 @@ test("paste, decide, correct, reload: the correction is still attached", async (
     `${severityTop} (accepted)`,
   );
   await expect(recorded.getByTestId("recorded-fraud")).toContainText(`${fraudOther} (corrected)`);
-  await labelStubbed(page, "worker is a stub, not a model; the store and the correction are real");
-  await page.screenshot({ path: `${evidence}/2-correction-captured-stubbed.png`, fullPage: true });
+  if (!real) await label(page, "STUBBED: worker is a stub; the store and the correction are real");
+  await page.screenshot({
+    path: `${evidence}/2-correction-captured-${mode}.png`,
+    fullPage: true,
+  });
 
   await page.reload();
   await expect(page).toHaveURL(new RegExp(`/decisions/${id}$`));
@@ -118,10 +161,14 @@ test("paste, decide, correct, reload: the correction is still attached", async (
   await expect(again.getByTestId("recorded-fraud")).toContainText(`${fraudOther} (corrected)`);
   await expect(page.getByRole("button", { name: "Record answer" })).toHaveCount(0);
 
-  // The pair, read from the store rather than the page, and the refusal of a second answer.
+  // The pair, read from the store rather than the page: the correction beside the prediction
+  // it corrects, which is unchanged by it. Then the refusal of a second answer.
   const stored = (await (await request.get(`/api/inferences/decisions/${id}`)).json()) as Decision;
+  expect(stored.correction?.prediction_id).toBe(id);
   expect(stored.correction?.answers.fraud).toBe(fraudOther);
   expect(stored.correction?.outcomes).toMatchObject({ severity: "accepted", fraud: "corrected" });
+  expect(stored.answers).toEqual(predicted.answers);
+  expect(stored.model_revision).toBe(predicted.model_revision);
   const second = await request.post(`/api/inferences/decisions/${id}/correction`, {
     data: { answers: { severity: "low", fraud: fraudTop, risk_score: "1" } },
   });
@@ -129,11 +176,21 @@ test("paste, decide, correct, reload: the correction is still attached", async (
   const after = (await (await request.get(`/api/inferences/decisions/${id}`)).json()) as Decision;
   expect(after.correction?.answers.fraud).toBe(fraudOther);
 
+  await page.goto("/decisions");
+  const row = page.getByRole("row").filter({ has: page.locator(`a[href="/decisions/${id}"]`) });
+  await expect(row).toContainText("recorded");
+  if (real) {
+    await expectNoStubLabels(page);
+    await page.goto("/decide");
+    await expectNoStubLabels(page);
+  }
+
   expect(problems, "console errors, including any CSP violation").toEqual([]);
 });
 
 test("the eval panel puts the model beside the majority-class baseline", async ({ page }) => {
   await page.goto("/eval");
+  await expect(page.getByTestId("calibration")).toContainText("identity transform");
   // Synthetic rows, not a real model's output; the screenshot says so.
   const rows = ["label,p:low,p:high"];
   for (let i = 0; i < 40; i++) {
@@ -148,8 +205,9 @@ test("the eval panel puts the model beside the majority-class baseline", async (
   });
   await expect(page.getByTestId("verdict")).toBeVisible();
   await expect(page.getByText("majority baseline (low)")).toBeVisible();
-  await labelStubbed(page, "synthetic labelled CSV, not a real model's output");
-  await page.screenshot({ path: `${evidence}/3-eval-panel-stubbed.png`, fullPage: true });
+  if (real) await expectNoStubLabels(page);
+  await label(page, "SYNTHETIC: a labelled CSV made up for the e2e, not a real model's output");
+  await page.screenshot({ path: `${evidence}/3-eval-panel-${mode}.png`, fullPage: true });
 });
 
 test("a correction is refused on screen when the prediction is already corrected elsewhere", async ({
@@ -158,6 +216,7 @@ test("a correction is refused on screen when the prediction is already corrected
 }) => {
   const made = await request.post("/api/inferences/decisions", {
     data: { text: "A second alert", schema: { name: "alert-triage", version: 1 } },
+    timeout: answered.timeout,
   });
   expect(made.status()).toBe(201);
   const { id, answers } = (await made.json()) as Decision;

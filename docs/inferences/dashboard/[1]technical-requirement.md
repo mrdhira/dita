@@ -106,7 +106,7 @@ resolution. `services/dita-orchestrator/decisions/worker.go` is the only place t
 
 ```
 POST {INFERENCES_SYSTEM_ONE_URL}/decide
-  {"text": "...", "questions": [{"name", "type", "options", "range"?}]}
+  {"text": "...", "questions": [{"name", "type", "options", "range"?, "criteria"?}]}
 200
   {"model_id": "...", "model_revision": "...",
    "answers": [{"name": "severity", "probabilities": {"low": 0.2, ...}, "confidence": 0.7}]}
@@ -141,11 +141,21 @@ write is retried at all** (a retried decide would be a second prediction).
 ### Validation, once in each language, proven equal
 
 The rules exist twice by necessity — the client for UX, the server because a hand-rolled request must not
-bypass them. `specs/decisions/schema-cases.json` holds 22 cases (valid templates at every limit, each rule
+bypass them. `specs/decisions/schema-cases.json` holds 26 cases (valid templates at every limit, each rule
 broken alone, several broken at once) with the exact issue paths expected. The Go suite and the zod suite
 both run the file; a rule that drifts in either fails its suite. The zod schema keeps its rules in one
 `superRefine` over loosely-typed fields, because zod 4 skips later refinements after a failed field check and
 would then report fewer faults than Go does.
+
+A `noul` question's options are exactly `false` and `true`, in either order: the worker answers a noul with
+those keys and refuses one asked with any others, so a `yes`/`no` template would save and then fail at every
+`/decide`. `ValidateDraft`, zod and `schema-cases.json` all carry the rule.
+
+A question may carry `criteria`, an optional string with no further rule on either side (Go's
+`json:"criteria,omitempty"`). It is what the model reads as the question's instructions; without it the model
+sees only the question's name, and the answer moves materially (measured through the orchestrator: `warning`
+0.8507 with criteria, 0.6396 without). The editor has **no input for it yet**: loading a template and saving
+the next version keeps its criteria, but a new template cannot be given any from the dashboard.
 
 ### Control flow
 
@@ -185,6 +195,11 @@ the run:
 
 `beats_baseline` needs both better accuracy and lower Brier; the panel always shows the model beside the
 baseline, never alone.
+
+Above it, a **calibration panel** states that no calibration is fitted: every temperature in the checkpoint
+is 1.0, so temperature scaling is the identity and the probabilities are the model's raw softmax. The text is
+static; it changes when a fitted checkpoint lands, not before. `act_probability` is not shown anywhere: it is
+1.0 on this checkpoint and carries no signal.
 
 ## Alternatives considered
 
@@ -257,7 +272,7 @@ backend the dashboard does not have yet.
 
 ## Testing
 
-- **Unit (Vitest + React Testing Library), 80 tests:** the 22 shared schema cases; the probability renderer
+- **Unit (Vitest + React Testing Library), 96 tests:** the 26 shared schema cases; the noul rule, including the `yes`/`no` it used to accept; criteria kept through the editor; the calibration panel; the probability renderer
   (top-2 + confidence, never a bare value); correction state transitions (nothing preselected, record, 409
   shown and not retried, a stored correction shown on load); the CSV parser; error mapping per status; no
   retry on 4xx; the eval panel beside its baseline; the worker strip surviving a worker that is not running
@@ -270,18 +285,33 @@ backend the dashboard does not have yet.
   per-line `fsync`, which no unit test can observe.
 - **One Playwright e2e** — paste → decide → correct → reload → the correction is still attached — against
   Caddy with the production Caddyfile, the orchestrator binary over a fresh store, and the stub. It also reads
-  the pair back through the API and shows a second correction refused with the first standing.
+  the pair back through the API (the correction beside an unchanged prediction), shows the row in History, and
+  shows a second correction refused with the first standing.
+- **The same e2e against the real worker**, when `E2E_SYSTEM_ONE_URL` names one. The worker publishes no host
+  port, so the URL is its address on `proxy`:
+
+  ```sh
+  E2E_SYSTEM_ONE_URL=http://$(docker inspect -f '{{(index .NetworkSettings.Networks "proxy").IPAddress}}' \
+    inferences-system-one):8080 make -C services/inferences-dashboard e2e
+  ```
+
+  No stub starts. The run fails, never falls back, if the worker is unreachable or not ready. It also asserts
+  what only a real answer shows: `/info` and the stored prediction carry the `model_id` and `model_revision`
+  that `services/inferences-system-one/models.yaml` pins (`E2E_SYSTEM_ONE_MODELS` overrides the path), the
+  revision is on the page, every answer's probabilities sum to 1 within 1e-6, the noul answers with `false`
+  and `true`, and no page shows a stub label.
 - Not covered: model quality, which is the eval panel's number rather than a test.
 
 ## Evidence
 
-Under [`evidence/`](evidence/). **Every screenshot shows the stub worker** and says so on the page, in red.
+Under [`evidence/`](evidence/). A `-stubbed` screenshot shows the stub worker and says so on the page, in
+red; a `-real` one is written by the real-worker run. Either eval screenshot uses a synthetic CSV and says so.
 
 | file | what |
 | --- | --- |
-| `1-answer-view-stubbed.png` | per-option probabilities, top-2 and confidence for a three-question schema |
-| `2-correction-captured-stubbed.png` | the recorded pair, accepted and corrected per question |
-| `3-eval-panel-stubbed.png` | a synthetic labelled CSV beside the majority-class baseline |
+| `1-answer-view-{stubbed,real}.png` | per-option probabilities, top-2 and confidence for a three-question schema |
+| `2-correction-captured-{stubbed,real}.png` | the recorded pair, accepted and corrected per question |
+| `3-eval-panel-{stubbed,real}.png` | the calibration panel; a synthetic labelled CSV beside the majority-class baseline |
 | `e2e-transcript.txt` | the Playwright run |
 | `headers-and-ports.txt` | `curl -skI` of the served page and `ss -ltn` |
 
@@ -290,5 +320,6 @@ Under [`evidence/`](evidence/). **Every screenshot shows the stub worker** and s
 - [ ] **Q:** ratify or reject the DIP response-shape change. Not assumed here. — *owner:* Dhira
 - [ ] **Q:** what "user" means on a single-account box: the gate on auth, and on a hostname. — *owner:* Dhira
 - [ ] **Q:** retention and access for the correction store: personal data and the training set. — *owner:* Dhira
-- [ ] **When the worker lands:** replace the stub contract in `decisions/worker.go` with the real answer shape,
-  and run the e2e against the worker instead of the stub.
+- [ ] **Follow-up:** an input for `criteria` in the template editor, since it changes the answer. — *owner:* Dita
+- [ ] **When the worker lands:** replace the stub contract in `decisions/worker.go` with the real answer shape
+  (the worker's PR). The e2e's real-worker path exists; run it with `E2E_SYSTEM_ONE_URL`.

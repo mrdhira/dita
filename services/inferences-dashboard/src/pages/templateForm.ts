@@ -1,11 +1,21 @@
 import type { FieldErrors, Resolver } from "react-hook-form";
 import { draftSchema, type Draft, type QuestionType } from "../contract/schema";
 
-/** The editor's shape: options are typed one per line, a range as two optional fields. */
+/**
+ * The editor's shape: options are typed one per line, a range as two optional fields.
+ * Criteria has no input yet; it is carried so an edited template does not lose it.
+ */
 export interface TemplateForm {
   name: string;
   description: string;
-  questions: { name: string; type: QuestionType; optionsText: string; min: string; max: string }[];
+  questions: {
+    name: string;
+    type: QuestionType;
+    optionsText: string;
+    min: string;
+    max: string;
+    criteria?: string;
+  }[];
 }
 
 export function toDraft(form: TemplateForm): Draft {
@@ -23,6 +33,7 @@ export function toDraft(form: TemplateForm): Draft {
         type: q.type,
         options,
         ...(hasRange ? { range: { min: Number(q.min), max: Number(q.max) } } : {}),
+        ...(q.criteria ? { criteria: q.criteria } : {}),
       };
     }),
   };
@@ -38,6 +49,7 @@ export function fromDraft(d: Draft): TemplateForm {
       optionsText: q.options.join("\n"),
       min: q.range ? String(q.range.min) : "",
       max: q.range ? String(q.range.max) : "",
+      ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
     })),
   };
 }

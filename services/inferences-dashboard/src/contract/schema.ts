@@ -12,6 +12,8 @@ export const MAX_DESCRIPTION = 500;
 export const MAX_TEXT = 20000;
 export const QUESTION_TYPES = ["noul", "choice", "score"] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
+/** The worker answers a noul with these keys and refuses a noul asked with any others. */
+export const NOUL_OPTIONS = ["false", "true"] as const;
 
 const TEMPLATE_NAME = /^[a-z][a-z0-9-]{1,63}$/;
 const QUESTION_NAME = /^[a-z][a-z0-9_]{0,63}$/;
@@ -26,6 +28,7 @@ export const questionSchema = z.strictObject({
   type: z.string(),
   options: z.array(z.string()),
   range: range.optional(),
+  criteria: z.string().optional(),
 });
 
 export const draftSchema = z
@@ -79,6 +82,15 @@ export const draftSchema = z
         }
         options.add(o);
       });
+      if (
+        q.type === "noul" &&
+        !(q.options.length === 2 && NOUL_OPTIONS.every((o) => q.options.includes(o)))
+      ) {
+        issue(
+          ["questions", i, "options"],
+          `a noul question's options are exactly ${NOUL_OPTIONS.map((o) => `"${o}"`).join(" and ")}`,
+        );
+      }
       if (q.range) {
         if (q.type !== "score")
           issue(["questions", i, "range"], "only a score question has a range");

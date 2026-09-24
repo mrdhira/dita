@@ -1,10 +1,5 @@
 # Read by BuildKit because it sits beside the Dockerfile; a .dockerignore in this directory
 # would not be, since the context is the repo root. Without it the weights are the context.
-**/models/
-**/.venv/
-**/__pycache__/
-**/*.pyc
-**/.coverage
 run/
 docs/
 specs/
@@ -19,3 +14,9 @@ services/inferences-reranker/README.md
 .claude/
 .github/
 .git/
+# Content excludes LAST: a re-include above would otherwise undo them (last match wins).
+**/models/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.coverage

@@ -34,15 +34,24 @@ QUESTION_FIELDS = frozenset({"name", "type", "options", "criteria", "range"})
 
 
 class Refusal(Exception):
-    """A request this worker will not run. The orchestrator counts 400 as `schema_invalid`."""
+    """A request this worker will not run. The orchestrator counts 400 as `schema_invalid`.
 
-    def __init__(self, message: str, status: int = 400, error_type: str = "Validation") -> None:
+    `path` names the fault in zod's dotted style (`questions.1.options`). It and `error_type` are
+    the contract the orchestrator's CheckQuestions matches through specs/decisions/worker-cases.json;
+    the message is prose for people."""
+
+    def __init__(self, message: str, status: int = 400, error_type: str = "Validation",
+                 path: str | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.error_type = error_type
+        self.path = path
 
     def response(self) -> Response:
-        return json_response(self.status, {"error": str(self), "error_type": self.error_type})
+        body = {"error": str(self), "error_type": self.error_type}
+        if self.path is not None:
+            body["path"] = self.path
+        return json_response(self.status, body)
 
 
 def routes(max_concurrent: int = MAX_CONCURRENT_REQUESTS, deadline_s: float = DEADLINE_S,
@@ -115,61 +124,61 @@ def parse_decide(body: bytes) -> Tuple[str, List[Dict[str, Any]]]:
         raise Refusal("`text` must be a non-blank string")
     questions = raw.get("questions")
     if not isinstance(questions, list) or not 1 <= len(questions) <= MAX_QUESTIONS:
-        raise Refusal(f"`questions` must be a list of 1 to {MAX_QUESTIONS} questions")
+        raise Refusal(f"`questions` must be a list of 1 to {MAX_QUESTIONS} questions", path="questions")
     seen = set()
     for index, q in enumerate(questions):
         _check_question(index, q)
         if q["name"] in seen:
-            raise Refusal(f"question {q['name']!r} appears twice")
+            raise Refusal(f"question {q['name']!r} appears twice", path=f"questions.{index}.name")
         seen.add(q["name"])
     return text, questions
 
 
 def _check_question(index: int, q: Any) -> None:
-    at = f"questions[{index}]"
+    at, path = f"questions[{index}]", f"questions.{index}"
     if not isinstance(q, dict):
-        raise Refusal(f"{at} must be an object")
+        raise Refusal(f"{at} must be an object", path=path)
     unknown = sorted(set(q) - QUESTION_FIELDS)
     if unknown:
-        raise Refusal(f"{at} has unknown field(s): {', '.join(unknown)}")
+        raise Refusal(f"{at} has unknown field(s): {', '.join(unknown)}", path=path)
     if not isinstance(q.get("name"), str) or not q["name"]:
-        raise Refusal(f"{at}.name must be a non-empty string")
+        raise Refusal(f"{at}.name must be a non-empty string", path=f"{path}.name")
     if q.get("type") not in TYPES:
-        raise Refusal(f"{at}.type must be one of {', '.join(TYPES)}")
+        raise Refusal(f"{at}.type must be one of {', '.join(TYPES)}", path=f"{path}.type")
     options = q.get("options")
     if (not isinstance(options, list) or not MIN_OPTIONS <= len(options) <= MAX_OPTIONS
             or not all(isinstance(o, str) and o.strip() for o in options)):
-        raise Refusal(f"{at}.options must be {MIN_OPTIONS} to {MAX_OPTIONS} non-blank strings")
+        raise Refusal(f"{at}.options must be {MIN_OPTIONS} to {MAX_OPTIONS} non-blank strings", path=f"{path}.options")
     if len(set(options)) != len(options):
-        raise Refusal(f"{at}.options repeats an option")
+        raise Refusal(f"{at}.options repeats an option", path=f"{path}.options")
     if q["type"] == "noul" and sorted(options) != list(NOUL_OPTIONS):
         raise Refusal(f"{at} is a noul: the model answers it only as `false` and `true`, "
-                      f"so its options must be exactly those, not {options}")
+                      f"so its options must be exactly those, not {options}", path=f"{path}.options")
     if "criteria" in q and not isinstance(q["criteria"], str):
-        raise Refusal(f"{at}.criteria must be a string")
+        raise Refusal(f"{at}.criteria must be a string", path=f"{path}.criteria")
     if q.get("range") is not None:
-        _check_range(at, q)
+        _check_range(at, f"{path}.range", q)
 
 
-def _check_range(at: str, q: Dict[str, Any]) -> None:
+def _check_range(at: str, path: str, q: Dict[str, Any]) -> None:
     """The model reads a score's options as its levels in order and never sees the range, so a
     range is accepted and ignored. It is refused only when it contradicts its own options."""
     if q["type"] != "score":
-        raise Refusal(f"{at}.range belongs only to a score question")
+        raise Refusal(f"{at}.range belongs only to a score question", path=path)
     bounds = q["range"]
     if not isinstance(bounds, dict) or not all(
             isinstance(bounds.get(k), (int, float)) and not isinstance(bounds.get(k), bool) for k in ("min", "max")):
-        raise Refusal(f"{at}.range must be {{min, max}} numbers")
+        raise Refusal(f"{at}.range must be {{min, max}} numbers", path=path)
     low, high = bounds["min"], bounds["max"]
     if not low < high:
-        raise Refusal(f"{at}.range min must be below max")
+        raise Refusal(f"{at}.range min must be below max", path=path)
     try:
         levels = [float(o) for o in q["options"]]
     except ValueError:
         return
     if levels != sorted(levels) or levels[0] < low or levels[-1] > high:
         raise Refusal(f"{at}.range {low}..{high} contradicts its options {q['options']}: numeric levels must "
-                      "rise within the range")
+                      "rise within the range", path=path)
 
 
 def to_model(q: Mapping[str, Any]) -> Dict[str, Any]:

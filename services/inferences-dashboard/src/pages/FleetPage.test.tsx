@@ -210,6 +210,20 @@ describe("FleetPage", () => {
     expect(screen.queryByText(note)).toBeNull();
   });
 
+  it("labels each value with its column in the phone-width cards, which have no header row", async () => {
+    fleet(report("inferences-embedding", "ready"));
+    renderAt("/", "/", <FleetPage />);
+    for (const name of ["inferences-embedding", "inferences-ocr"]) {
+      const r = await row(name);
+      const headers = [...document.querySelectorAll("thead th")].map((th) => th.textContent);
+      for (const i of [2, 3, 4]) {
+        const td = r.querySelectorAll("td")[i];
+        expect(td?.dataset.label).toBe(headers[i]);
+        expect(td?.className).toContain("max-sm:before:content-[attr(data-label)]");
+      }
+    }
+  });
+
   it("announces the paused and failed notes, never the clock", async () => {
     fleet(report("inferences-embedding", "ready"));
     renderAt("/", "/", <FleetPage />);

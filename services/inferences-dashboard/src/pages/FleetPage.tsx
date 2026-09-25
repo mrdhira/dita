@@ -19,6 +19,8 @@ import { usePollInterval } from "../lib/visibility";
 import { useWorkerMetrics } from "./service/useWorkerMetrics";
 
 const cell = "py-2 pr-4 align-top max-sm:block max-sm:py-0.5";
+/** Cards at phone width have no header row, so each value carries its column's name. */
+const labelled = `${cell} max-sm:before:mr-2 max-sm:before:font-sans max-sm:before:text-slate-600 max-sm:before:content-[attr(data-label)]`;
 
 function ResidentModel({
   report,
@@ -83,13 +85,16 @@ const FleetRow = memo(function FleetRow({
         )}
         {stale && <StaleNote at={staleSince} />}
       </td>
-      <td className={`${cell} font-mono text-xs`}>
+      <td data-label="resident model" className={`${labelled} font-mono text-xs`}>
         <ResidentModel report={report} deployed={deployed} />
       </td>
-      <td className={`${cell} font-mono text-xs`}>
+      <td data-label="resident for" className={`${labelled} font-mono text-xs`}>
         {deployed ? <ResidentFor service={service.id} /> : "—"}
       </td>
-      <td className={`${cell} max-w-xs text-xs break-words text-slate-700`}>
+      <td
+        data-label="last error"
+        className={`${labelled} max-w-xs text-xs break-words text-slate-700`}
+      >
         {report?.error ?? "—"}
       </td>
       <td className={cell}>

@@ -623,3 +623,42 @@ func TestMetricsStopsReadingAnEndlessPageAtTheBound(t *testing.T) {
 		t.Fatalf("got %d %q (%v), want 502 too_large: reading must stop at the bound, not run to the probe timeout", rec.Code, rec.Body, err)
 	}
 }
+
+func TestWorkersProbesEveryWorkerAtOnce(t *testing.T) {
+	const probe = 300 * time.Millisecond
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			time.Sleep(probe / 2)
+			w.WriteHeader(http.StatusOK)
+		case "/info":
+			<-r.Context().Done()
+		}
+	})
+	cfg := Config{Timeout: time.Minute, ProbeTimeout: probe}
+	for _, name := range []string{Embedding, Reranker, SystemOne} {
+		cfg.Workers = append(cfg.Workers, Worker{Name: name, URL: start(t, slow)})
+	}
+	g := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rec := httptest.NewRecorder()
+	began := time.Now()
+	g.Workers(rec, httptest.NewRequest(http.MethodGet, "/api/inferences/workers", nil))
+	took := time.Since(began)
+
+	var doc struct{ Workers []report }
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || len(doc.Workers) != 3 {
+		t.Fatalf("got %q (%v), want three reports", rec.Body, err)
+	}
+	for _, r := range doc.Workers {
+		if r.State != "ready" || string(r.Info) != "null" {
+			t.Fatalf("%s: state %q info %s, want ready with /info timed out", r.Name, r.State, r.Info)
+		}
+	}
+	if took < probe {
+		t.Fatalf("took %s: each worker's /info should have run out its %s probe", took, probe)
+	}
+	if limit := 2*probe + probe/2; took > limit {
+		t.Fatalf("took %s for three workers, over %s: the dashboard's read deadline assumes each "+
+			"GET /workers costs about 2 × ProbeTimeout, which holds only if workers are probed at once", took, limit)
+	}
+}

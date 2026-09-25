@@ -235,13 +235,23 @@ class ServiceIdentityTest(unittest.TestCase):
         self.assertEqual(sorted(WORKER.routes), ["/embed", "/health", "/info"])
         self.assertEqual(WORKER.registry_path, MANIFEST)
 
-    def test_the_default_is_the_english_model_and_says_so(self) -> None:
+    def test_the_default_is_the_model_we_chose(self) -> None:
+        # EMB-1, decided after measuring: multilingual rather than English-only, because the bank is
+        # English but the second language is not. English-only nomic is still registered below.
         default = self.registry.get(self.registry.default_model)
-        self.assertEqual(default.id, "nomic-embed-text-v1.5")
-        self.assertEqual(default.langs, ["en"])
-        self.assertIn("English only", default.description)
-        self.assertEqual(default.options["prompts"]["query"], "search_query: ")
-        self.assertEqual(default.options["prompts"]["document"], "search_document: ")
+        self.assertEqual(default.id, "qwen3-embedding-0.6b")
+        self.assertEqual(default.langs, ["en", "id", "ja"])
+        self.assertEqual(default.options["dimensions"], 1024)
+        self.assertIn("Query:", default.options["prompts"]["query"])
+
+    def test_the_english_only_model_says_so(self) -> None:
+        # It is not the default any more, but its prefixes are data, not decoration: nomic is
+        # asymmetric and degrades badly without them, so a registered entry that loses them is a bug.
+        nomic = self.registry.get("nomic-embed-text-v1.5")
+        self.assertEqual(nomic.langs, ["en"])
+        self.assertIn("English only", nomic.description)
+        self.assertEqual(nomic.options["prompts"]["query"], "search_query: ")
+        self.assertEqual(nomic.options["prompts"]["document"], "search_document: ")
 
     def test_the_multilingual_models_cover_indonesian_and_japanese(self) -> None:
         for model_id in ("embeddinggemma-300m", "qwen3-embedding-0.6b"):

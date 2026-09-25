@@ -9,7 +9,8 @@ models:
   - id: nomic-embed-text-v1.5
     description: >-
       nomic-ai/nomic-embed-text-v1.5 as ONNX. English only: do not select it for Indonesian
-      or Japanese text. Asymmetric, so queries and documents need their prefixes. The default.
+      or Japanese text. Asymmetric, so queries and documents need their prefixes. Registered
+      for English-only comparison against the default; not the default itself.
     engine: onnx_embedder
     langs: [en]
     source:

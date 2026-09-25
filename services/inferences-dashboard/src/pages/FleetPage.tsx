@@ -59,7 +59,7 @@ const FleetRow = memo(function FleetRow({
         )}
       </td>
       <td className={`${cell} max-w-xs text-xs break-words text-slate-700`}>
-        {report?.error ?? ""}
+        {report?.error ?? "—"}
       </td>
       <td className={cell}>
         {deployed && (
@@ -100,9 +100,7 @@ export function FleetPage() {
             <th className="pr-4 font-normal">state</th>
             <th className="pr-4 font-normal">resident model</th>
             <th className="pr-4 font-normal">last error</th>
-            <th className="font-normal">
-              <span className="sr-only">details</span>
-            </th>
+            <th className="font-normal">details</th>
           </tr>
         </thead>
         <tbody className="max-sm:block">

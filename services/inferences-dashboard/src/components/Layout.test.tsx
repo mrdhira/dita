@@ -56,3 +56,20 @@ describe("the worker strip", () => {
     expect(screen.getByText("the page itself")).toBeTruthy();
   });
 });
+
+describe("the navigation", () => {
+  it("has the five sections, and no entry per service", async () => {
+    stubApi({ "GET /workers": () => ({ status: 200, body: workers }) });
+    page();
+    const sections = screen.getByRole("navigation", { name: "sections" });
+    expect(
+      within(sections)
+        .getAllByRole("link")
+        .map((l) => l.textContent),
+    ).toEqual(["Fleet", "Models", "Activity", "Jobs", "Settings"]);
+    await screen.findAllByRole("listitem");
+    for (const nav of screen.getAllByRole("navigation")) {
+      expect(nav.textContent).not.toMatch(/embedding|reranker|system-one|ocr|stt|tts/);
+    }
+  });
+});

@@ -147,7 +147,57 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return parsed as T;
 }
 
+/** A Try-it answer as it arrived: the status and body are shown, never interpreted away. */
+export interface TryResult {
+  status: number;
+  body: string;
+  computeTime: string | null;
+  modelId: string | null;
+  problem: Problem | null;
+}
+
+async function tryRequest(path: string, body: string): Promise<TryResult> {
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body,
+  });
+  const text = await res.text();
+  let problem: Problem | null = null;
+  if (!res.ok) {
+    try {
+      problem = toProblem(JSON.parse(text), text);
+    } catch {
+      problem = { error: text || res.statusText };
+    }
+  }
+  return {
+    status: res.status,
+    body: text,
+    computeTime: res.headers.get("x-compute-time"),
+    modelId: res.headers.get("x-model-id"),
+    problem,
+  };
+}
+
+async function metricsText(service: string): Promise<string> {
+  const res = await fetch(`${BASE}/metrics/${encodeURIComponent(service)}`, {
+    headers: { Accept: "text/plain" },
+  });
+  const text = await res.text();
+  if (res.ok) return text;
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = null;
+  }
+  throw new ApiError(res.status, toProblem(parsed, text || res.statusText));
+}
+
 export const api = {
+  metrics: metricsText,
+  tryIt: tryRequest,
   workers: () => request<{ workers: WorkerReport[] }>("GET", "/workers"),
   templates: () => request<{ templates: Template[] }>("GET", "/schemas"),
   versions: (name: string) =>

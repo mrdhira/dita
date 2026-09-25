@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkerReport } from "../api/client";
+import { GATEWAY_PROBE_TIMEOUT_MS, READ_DEADLINE_MS, type WorkerReport } from "../api/client";
 import rerankerMetrics from "../test/reranker.metrics.txt?raw";
 import { renderAt, stubApi } from "../test/render";
 import { FleetPage } from "./FleetPage";
@@ -321,7 +321,7 @@ describe("FleetPage", () => {
       const badge = () =>
         within(r).getByText("ready", { exact: false, selector: "span[data-tone]" });
 
-      await act(() => vi.advanceTimersByTimeAsync(19_000));
+      await act(() => vi.advanceTimersByTimeAsync(2 * 5_000 + READ_DEADLINE_MS - 1_000));
       expect(n).toBe(2);
       expect(badge().dataset.stale).toBeUndefined();
       expect(screen.getByRole("status").textContent).toBe("");
@@ -349,7 +349,7 @@ describe("FleetPage", () => {
       renderAt("/", "/", <FleetPage />);
       const r = await row("inferences-embedding");
 
-      await act(() => vi.advanceTimersByTimeAsync(14_500));
+      await act(() => vi.advanceTimersByTimeAsync(5_000 + READ_DEADLINE_MS - 500));
       expect(signals).toHaveLength(2);
       expect(signals[1]?.aborted).toBe(false);
 
@@ -380,6 +380,46 @@ describe("FleetPage", () => {
         expect(banner).not.toMatch(/no model|The worker answered/);
       });
     }
+
+    it("keeps an answer that takes the gateway's worst case for /workers: two probes in a row", async () => {
+      const slowest = 2 * GATEWAY_PROBE_TIMEOUT_MS + 300;
+      expect(slowest).toBeLessThan(READ_DEADLINE_MS);
+      const signals: AbortSignal[] = [];
+      vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
+        if (!input.endsWith("/workers")) return new Promise<Response>(() => undefined);
+        if (signals.push(init?.signal as AbortSignal) === 1) return Promise.resolve(answered());
+        return new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(
+              new Response(
+                JSON.stringify({
+                  workers: [
+                    report("inferences-embedding", "ready", {
+                      info: { model_id: "slow-but-said" },
+                    }),
+                  ],
+                }),
+                { status: 200 },
+              ),
+            );
+          }, slowest);
+          init?.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(init.signal?.reason as Error);
+          });
+        });
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-embedding");
+
+      await act(() => vi.advanceTimersByTimeAsync(5_000 + slowest + 100));
+      expect(signals[1]?.aborted).toBe(false);
+      expect(within(r).getByText("slow-but-said")).toBeTruthy();
+      expect(
+        within(r).getByText("ready", { exact: false, selector: "span[data-tone]" }).dataset.stale,
+      ).toBeUndefined();
+      expect(screen.getByRole("status").textContent).toBe("");
+    });
 
     it("drops resident-for to — when the worker's /metrics stops answering", async () => {
       let failing = false;

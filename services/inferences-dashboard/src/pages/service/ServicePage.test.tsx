@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import rerankerMetrics from "../../test/reranker.metrics.txt?raw";
+import { READ_DEADLINE_MS } from "../../api/client";
 import { renderAt, stubApi } from "../../test/render";
 import { ServicePage } from "./ServicePage";
 
@@ -466,7 +467,7 @@ describe("ServicePage", () => {
       });
       renderAt("/services/reranker/models", "/services/:id/:tab?", <ServicePage />);
       const badge = await screen.findByText("ready", { exact: false, selector: "span[data-tone]" });
-      await act(() => vi.advanceTimersByTimeAsync(29_000));
+      await act(() => vi.advanceTimersByTimeAsync(2 * 10_000 + READ_DEADLINE_MS - 1_000));
       expect(badge.dataset.stale).toBeUndefined();
       await act(() => vi.advanceTimersByTimeAsync(2_000));
       expect(badge.dataset.stale).toBe("true");

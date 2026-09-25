@@ -3,6 +3,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "../App";
+import { READ_DEADLINE_MS } from "../api/client";
 import { stubApi } from "../test/render";
 import { Layout } from "./Layout";
 
@@ -66,7 +67,7 @@ describe("the worker strip", () => {
       );
       page();
       await screen.findAllByRole("listitem");
-      await act(() => vi.advanceTimersByTimeAsync(69_000));
+      await act(() => vi.advanceTimersByTimeAsync(2 * 30_000 + READ_DEADLINE_MS - 1_000));
       expect(n).toBe(2);
       expect(screen.getAllByRole("listitem")).toHaveLength(3);
       await act(() => vi.advanceTimersByTimeAsync(2_000));

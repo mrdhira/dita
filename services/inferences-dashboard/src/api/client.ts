@@ -154,7 +154,11 @@ async function request<T>(
   return parsed as T;
 }
 
-export const READ_DEADLINE_MS = 10_000;
+/** The gateway's DefaultProbeTimeout (dita-orchestrator handler/inferences/config.go); a test pins it. */
+export const GATEWAY_PROBE_TIMEOUT_MS = 5_000;
+
+/** GET /workers probes /health and then /info, each up to the probe timeout: twice it, plus margin. */
+export const READ_DEADLINE_MS = 2 * GATEWAY_PROBE_TIMEOUT_MS + 5_000;
 
 /**
  * A polled read ends at its deadline. Without one, a request that never answers keeps the query

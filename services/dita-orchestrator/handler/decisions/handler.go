@@ -193,9 +193,7 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		h.count(refusal(resp.StatusCode))
-		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-		w.WriteHeader(resp.StatusCode)
-		w.Write(raw)
+		inferences.RelayFailure(w, h.worker, resp.StatusCode, resp.Header.Get("Content-Type"), raw)
 		return
 	}
 	reply, err := decisions.ParseReply(raw, t.Questions)

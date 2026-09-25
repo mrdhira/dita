@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -532,25 +533,42 @@ func TestMetricsFromAWorkerThatIsDown(t *testing.T) {
 }
 
 func TestMetricsKeepsAWorkersFailureAFailure(t *testing.T) {
+	sendError := "<!DOCTYPE HTML>\n<html><body><h1>Error response</h1><p>Error code: 404</p></body></html>\n"
+	own := `{"error":"no model is loaded","error_type":"Unhealthy"}`
 	cases := []struct {
 		name        string
 		status      int
 		contentType string
+		body        string
+		verbatim    bool
 	}{
-		{"404 with an HTML page", 404, "text/html; charset=utf-8"},
-		{"500 as plain text", 500, "text/plain; charset=utf-8"},
-		{"503 as JSON", 503, "application/json"},
+		{"404: the worker's send_error HTML page, as JSON naming the worker", 404, "text/html;charset=utf-8", sendError, false},
+		{"500 as plain text, as JSON naming the worker", 500, "text/plain; charset=utf-8", "boom", false},
+		{"500 with an empty body, as JSON naming the worker", 500, "", "", false},
+		{"502: JSON that is not an error object, as JSON naming the worker", 502, "application/json", `{"status":"down"}`, false},
+		{"503: the worker's own JSON error, unchanged", 503, "application/json", own, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			up := &upstream{status: c.status, response: []byte("not a metrics page"), headers: map[string]string{"Content-Type": c.contentType}}
+			up := &upstream{status: c.status, response: []byte(c.body), headers: map[string]string{"Content-Type": c.contentType}}
 			gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, up)})
 			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
 			if rec.Code != c.status {
 				t.Fatalf("status %d, want the worker's %d", rec.Code, c.status)
 			}
-			if got := rec.Header().Get("Content-Type"); got != c.contentType {
-				t.Fatalf("content type %q, want the worker's %q, never %q", got, c.contentType, MetricsContentType)
+			if got := rec.Header().Get("Content-Type"); got == MetricsContentType || !strings.HasPrefix(got, "application/json") {
+				t.Fatalf("content type %q, want JSON and never %q", got, MetricsContentType)
+			}
+			if c.verbatim {
+				if rec.Body.String() != c.body {
+					t.Fatalf("got %q, want the worker's own error %q unchanged", rec.Body, c.body)
+				}
+				return
+			}
+			var got failure
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.ErrorType != "Backend" || got.Worker != Reranker ||
+				!strings.Contains(got.Error, fmt.Sprintf("answered %d", c.status)) || strings.Contains(rec.Body.String(), "<") {
+				t.Fatalf("got %q (%v), want the orchestrator's JSON naming %s and its %d, with none of the page", rec.Body, err, Reranker, c.status)
 			}
 		})
 	}

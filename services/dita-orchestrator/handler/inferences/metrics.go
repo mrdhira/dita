@@ -24,9 +24,9 @@ var metricsWorkers = map[string]string{
 	"system-one": SystemOne,
 }
 
-// Metrics answers a worker's /metrics body verbatim. The service is one of a fixed set and the
-// upstream path is always /metrics: this is not a path proxy, and nothing else is reachable
-// through it.
+// Metrics answers a worker's /metrics page verbatim, and its failure as RelayFailure does. The
+// service is one of a fixed set and the upstream path is always /metrics: this is not a path
+// proxy, and nothing else is reachable through it.
 func (g *Gateway) Metrics(w http.ResponseWriter, r *http.Request) {
 	service := r.PathValue("service")
 	worker, ok := g.byName[metricsWorkers[service]]
@@ -48,12 +48,11 @@ func (g *Gateway) Metrics(w http.ResponseWriter, r *http.Request) {
 			slog.String("url", worker.URL.String()), slog.String("reason", reason), slog.Any("err", err))
 		return
 	}
-	if status == http.StatusOK {
-		contentType = MetricsContentType
+	if status != http.StatusOK {
+		RelayFailure(w, worker, status, contentType, body)
+		return
 	}
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	}
+	w.Header().Set("Content-Type", MetricsContentType)
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

@@ -84,11 +84,16 @@ func (e *env) predictionsOnDisk() int {
 
 func worker(t *testing.T, status int, body string) *url.URL {
 	t.Helper()
+	return workerAs(t, status, "application/json", body)
+}
+
+func workerAs(t *testing.T, status int, contentType, body string) *url.URL {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/decide" {
 			t.Errorf("the worker was asked for %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
 		w.Write([]byte(body))
 	}))
@@ -108,6 +113,7 @@ const decide = `{"text":"Alert 4411: three failed logins then a transfer","schem
 
 func TestNothingIsWrittenUnlessTheWorkerAnswered(t *testing.T) {
 	noModel := `{"error":"no model is loaded; the orchestrator has not loaded one yet","error_type":"Unhealthy"}`
+	sendError := "<!DOCTYPE HTML>\n<html><body><h1>Error response</h1><p>Error code: 500</p></body></html>\n"
 	cases := []struct {
 		name    string
 		worker  *url.URL
@@ -121,6 +127,8 @@ func TestNothingIsWrittenUnlessTheWorkerAnswered(t *testing.T) {
 		{"the worker's one slot is taken: its 429", worker(t, 429, `{"error":"Model is overloaded","error_type":"Overloaded"}`), 429, "Overloaded", "busy"},
 		{"the worker is not running", closedPort(t), 503, `"reason":"not_running"`, "not_running"},
 		{"an answer to a different question", worker(t, 200, `{"model_revision":"r","answers":[]}`), 502, "answered 0 questions", "bad_reply"},
+		{"the worker's own HTML 500: its status, as JSON naming the worker", workerAs(t, 500, "text/html;charset=utf-8", sendError), 500,
+			`"error":"inferences-system-one answered 500 with a body of type text/html, not a JSON error","error_type":"Backend","worker":"inferences-system-one"`, "engine_error"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -129,8 +137,8 @@ func TestNothingIsWrittenUnlessTheWorkerAnswered(t *testing.T) {
 				t.Fatalf("saving the schema: %d", code)
 			}
 			code, _, body := e.call("POST", "/decisions", decide)
-			if code != c.status || !strings.Contains(body, c.body) {
-				t.Fatalf("got %d %s, want %d containing %s", code, body, c.status, c.body)
+			if code != c.status || !strings.Contains(body, c.body) || strings.Contains(body, "<") {
+				t.Fatalf("got %d %s, want %d containing %s, and no HTML", code, body, c.status, c.body)
 			}
 			if n := e.predictionsOnDisk(); n != 0 {
 				t.Fatalf("%d predictions written for a decision that never happened", n)

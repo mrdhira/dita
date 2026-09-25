@@ -92,3 +92,17 @@
 - **Pattern:** a per-commit build/lint/test loop printed `Tests 1 failed | 291 passed` and nothing
   else. The failure did not reproduce in 18 runs, and which test it was is now unknowable.
 - **Rule:** every gate loop prints the `FAIL` lines and the first assertion, not just the count.
+
+## zsh does not split a scalar: never let a destructive step follow an unchecked backup
+- **Pattern:** `FILES="a b c"; cp $FILES…` in zsh passes one argument, so every backup failed, and
+  the `git checkout` and `rm` that followed still ran and removed uncommitted work. The same
+  non-splitting had already broken a mutation loop in an earlier session.
+- **Rule:** use an array (`files=(a b c)`, `"${files[@]}"`), and chain the destructive step on the
+  backup's success (`cp … && git checkout …`). Commit or WIP-commit before any experiment that
+  rewrites tracked files.
+
+## A table row can pass through the detail line
+- **Pattern:** the Decide row asserted that the banner *text* contained "inferences-system-one
+  answered 500". With the fix removed, the title fell back to "The request failed (500)", but the
+  detail still contained the phrase, so the row passed. Mutation caught it.
+- **Rule:** when the claim is the title, assert the title element, not the banner's whole text.

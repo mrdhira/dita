@@ -319,14 +319,31 @@ Baseline before any change: `pnpm vitest run --maxWorkers=2` → 12 files, 96 te
       carries it. Docstring and PR line corrected. Tests: History and Templates (empty 502,
       reasonless 503), Decide (the worker's own 503).
 - [x] SHOULD 2. `READ_DEADLINE_MS = 2 × GATEWAY_PROBE_TIMEOUT_MS + margin` (15 s); a contract test
-      reads `DefaultProbeTimeout` from the Go source; a behaviour test accepts a 10.2 s answer.
+      reads `DefaultProbeTimeout` from the Go source; a behaviour test accepts a 10.3 s answer (2 probes + 0.3 s).
       Hang tests derive their times from the constants.
 - [x] SHOULD 3. Test: no "late" while the tab is hidden.
 - [x] NIT. A hung read (`NoAnswer`) reads "has not answered", not "failed". PR: three disproved claims
       corrected, "Third review" section, metrics-parsing weaknesses disclosed, phone-label wording
       narrowed.
-- Result: 11 new mutants, all killed (M1a–M1d, S2a–S2d, S3, and two on the NoAnswer mapping),
+- Result: 11 new mutants, all killed (M1a–M1d, S2a–S2d, S3, and two on the NoAnswer mapping; the PR's
+  12th row is S2a re-run with its precondition removed, not a new mutant),
   plus the behaviour test seen red with its precondition removed. 296 tests. Every new commit
   builds and lints on its own; one run at `ce5f00d` showed "1 failed" that did not reproduce in
   18 further runs, and its name was not captured.
 - Screenshot 8 retaken: a hang now reads "has not answered".
+
+## Review round four (`.claude/tasks/console-r1-round4-fixes.md`, report at `.claude/review/report4.md`)
+- [x] MUST A. Option 1: `inferences.RelayFailure` answers both relays (`/decisions`, `/metrics`):
+      a worker's own `{"error": ...}` passes unchanged; anything else keeps the status and becomes
+      `{error, error_type: "Backend", worker}`. The console reads that as "<worker> answered N".
+      `errors.ts` comments corrected.
+- [x] SHOULD B. `TestWorkersProbesEveryWorkerAtOnce`: three slow workers, 300 ms probe, total within
+      2.5 probes. Sequential probing (X1) fails at 1.36 s.
+- [x] SHOULD C. `asyncUtilTimeout: 5_000`, `testTimeout: 15_000`, every `vi.waitFor` → `waitFor`,
+      `harness.test.tsx`. Four suites at once x 3: old 5/12 failed (DecidePage first test), new 0/12;
+      six at once x 2: new 0/12.
+- [x] NITs: route/body comment; real vitest transcript; round-three counts re-run on the full suite
+      at `a42bc85`; raw-HTML detail and `config.go` density disclosed.
+- Mistake: a zsh scalar holding five paths was not word-split, so the backup `cp` failed while
+  `git checkout`/`rm` succeeded and removed the uncommitted round-four test-config changes; they
+  were re-applied from the recorded edits and re-verified (21 files, 300 tests) before any commit.

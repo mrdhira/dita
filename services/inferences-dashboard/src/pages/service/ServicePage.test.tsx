@@ -283,7 +283,7 @@ describe("ServicePage", () => {
       {
         name: "plain text with none of the series",
         answer: { status: 200, body: "some_other_exporter_total 3\n" },
-        says: "none of the series this console reads",
+        says: "it has no dita_worker_uptime_seconds",
       },
       {
         name: "the worker's own 404",
@@ -303,6 +303,60 @@ describe("ServicePage", () => {
         expect(screen.queryByRole("table", { name: "series" })).toBeNull();
       });
     }
+  });
+
+  it("metrics: a cut page says unknown for what it does not declare, never none", async () => {
+    const cut = rerankerMetrics.slice(
+      0,
+      rerankerMetrics.indexOf("# HELP dita_worker_errors_total"),
+    );
+    const page = `${cut}dita_worker_uptime_seconds{worker="inferences-reranker"} 4000\n`;
+    expect(cut).not.toContain("dita_worker_errors_total");
+    open("/services/reranker/metrics", {
+      "GET /metrics/reranker": () => ({ status: 200, body: page }),
+    });
+    const series = await screen.findByRole("table", { name: "series" });
+    expect(series.textContent).not.toContain("none since the last restart");
+    expect(
+      within(series).getAllByText("unknown: the page does not declare it").length,
+    ).toBeGreaterThan(3);
+    expect(screen.getAllByText("unknown: the page does not declare it").length).toBeGreaterThan(
+      within(series).getAllByText("unknown: the page does not declare it").length,
+    );
+    expect(screen.queryByText("no observations since the last restart")).toBeNull();
+  });
+
+  it("metrics: the whole page still says none for a declared family with no samples", async () => {
+    expect(rerankerMetrics).toMatch(/^# TYPE dita_worker_errors_total counter$/m);
+    expect(rerankerMetrics).not.toMatch(/^dita_worker_errors_total/m);
+    open("/services/reranker/metrics");
+    const series = await screen.findByRole("table", { name: "series" });
+    expect(series.textContent).toContain("none since the last restart");
+    expect(series.textContent).not.toContain("unknown");
+  });
+
+  it("overview: DIP failures is — when the page does not declare them", async () => {
+    const cut = rerankerMetrics.slice(
+      0,
+      rerankerMetrics.indexOf("# HELP dita_worker_errors_total"),
+    );
+    open("/services/reranker", {
+      "GET /metrics/reranker": () => ({
+        status: 200,
+        body: `${cut}dita_worker_uptime_seconds{worker="inferences-reranker"} 4000\n`,
+      }),
+    });
+    const figure = await screen.findByText("DIP failures, since the last restart");
+    expect(figure.nextSibling?.textContent).toBe("—");
+  });
+
+  it("overview: DIP failures is 0 when the page declares them with no samples", async () => {
+    expect(rerankerMetrics).toMatch(/^# TYPE dita_worker_errors_total counter$/m);
+    open("/services/reranker");
+    const figure = await screen.findByText("DIP failures, since the last restart");
+    await vi.waitFor(() => {
+      expect(figure.nextSibling?.textContent).toBe("0");
+    });
   });
 
   it("says when the gateway does not report this service", async () => {

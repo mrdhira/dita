@@ -70,9 +70,10 @@ export interface Histogram {
   count: number | null;
 }
 
+/** `declared`: the page carries the family's `# TYPE` line, so no samples means none, not unknown. */
 export interface WorkerMetrics {
-  series: { def: SeriesDef; samples: Sample[] }[];
-  histograms: { title: string; name: string; series: Histogram[] }[];
+  series: { def: SeriesDef; samples: Sample[]; declared: boolean }[];
+  histograms: { title: string; name: string; series: Histogram[]; declared: boolean }[];
 }
 
 const LINE = /^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})?\s+(\S+)(?:\s+\S+)?$/;
@@ -99,6 +100,17 @@ export function parseExposition(text: string): Sample[] {
     samples.push({ name: m[1], labels, value: number(m[3]) });
   }
   return samples;
+}
+
+const TYPE = /^#\s*TYPE\s+([a-zA-Z_:][a-zA-Z0-9_:]*)\s/;
+
+function declaredFamilies(text: string): Set<string> {
+  const names = new Set<string>();
+  for (const line of text.split("\n")) {
+    const m = TYPE.exec(line.trim());
+    if (m?.[1]) names.add(m[1]);
+  }
+  return names;
 }
 
 const key = (labels: Labels) =>
@@ -129,24 +141,32 @@ function histogramsOf(name: string, samples: Sample[]): Histogram[] {
   return [...byLabels.values()];
 }
 
-const RECOGNISED = new Set([
-  ...SERIES.map((s) => s.name),
-  ...HISTOGRAMS.flatMap((h) => [`${h.name}_bucket`, `${h.name}_sum`, `${h.name}_count`]),
-]);
+const ALWAYS = "dita_worker_uptime_seconds";
 
-/** A page with none of the series this console reads is refused: it would read as an idle worker. */
+/**
+ * Every worker's page carries an uptime sample, and a `# TYPE` line for each family it knows.
+ * A page without the uptime is not a worker's; a family without its `# TYPE` line is unknown.
+ */
 export function readWorkerMetrics(text: string): WorkerMetrics {
   const samples = parseExposition(text);
-  if (!samples.some((s) => RECOGNISED.has(s.name))) {
+  if (!samples.some((s) => s.name === ALWAYS)) {
     throw new ApiError(502, {
-      error:
-        "the answer is not a worker's /metrics page: it has none of the series this console reads",
+      error: `the answer is not a worker's /metrics page: it has no ${ALWAYS}, which every worker's page carries`,
       error_type: "NotMetrics",
     });
   }
+  const declared = declaredFamilies(text);
   return {
-    series: SERIES.map((def) => ({ def, samples: samples.filter((s) => s.name === def.name) })),
-    histograms: HISTOGRAMS.map((h) => ({ ...h, series: histogramsOf(h.name, samples) })),
+    series: SERIES.map((def) => ({
+      def,
+      samples: samples.filter((s) => s.name === def.name),
+      declared: declared.has(def.name),
+    })),
+    histograms: HISTOGRAMS.map((h) => ({
+      ...h,
+      series: histogramsOf(h.name, samples),
+      declared: declared.has(h.name),
+    })),
   };
 }
 
@@ -162,8 +182,9 @@ export function first(metrics: WorkerMetrics, name: string): number | null {
 }
 
 export function total(metrics: WorkerMetrics, name: string): number | null {
-  const samples = metrics.series.find((s) => s.def.name === name)?.samples;
-  return samples ? samples.reduce((sum, s) => sum + s.value, 0) : null;
+  const series = metrics.series.find((s) => s.def.name === name);
+  if (!series || (series.samples.length === 0 && !series.declared)) return null;
+  return series.samples.reduce((sum, s) => sum + s.value, 0);
 }
 
 export function observations(metrics: WorkerMetrics, name: string): number | null {

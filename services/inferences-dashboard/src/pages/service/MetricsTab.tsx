@@ -58,7 +58,7 @@ export function MetricsTab({ service }: { service: string }) {
               </tr>
             </thead>
             <tbody>
-              {m.series.map(({ def, samples }) =>
+              {m.series.map(({ def, samples, declared }) =>
                 samples.length === 0 ? (
                   <tr key={def.name} className="border-t border-slate-100">
                     <td className="py-1 pr-4">
@@ -67,7 +67,11 @@ export function MetricsTab({ service }: { service: string }) {
                     </td>
                     <td />
                     <td className="text-slate-700">
-                      {def.counter ? "none since the last restart" : "not reported"}
+                      {!declared
+                        ? "unknown: the page does not declare it"
+                        : def.counter
+                          ? "none since the last restart"
+                          : "not reported"}
                     </td>
                   </tr>
                 ) : (
@@ -98,7 +102,11 @@ export function MetricsTab({ service }: { service: string }) {
                 ÷ count; nothing finer is estimated from the buckets.
               </p>
               {h.series.length === 0 ? (
-                <p className="text-sm text-slate-700">no observations since the last restart</p>
+                <p className="text-sm text-slate-700">
+                  {h.declared
+                    ? "no observations since the last restart"
+                    : "unknown: the page does not declare it"}
+                </p>
               ) : (
                 h.series.map((s) => <HistogramTable key={labelText(s.labels)} h={s} />)
               )}

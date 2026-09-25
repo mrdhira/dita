@@ -229,6 +229,28 @@ dishonest version of this feature. What ships in release 1 instead:
   started_at, ended_at, progress, log ref, artifact}`, polled like everything else, with the artifact link
   being the point. Ray's `JobStatus` is the vocabulary; `is_terminal()` is why the poll stops.
 
+**Requirement (Dhira, 2026-09-25): capture every inference's input and output, so a future fit trains on our own
+usage.** Nothing captures it today. What each service would have to keep, read from the live stores on
+2026-09-25:
+
+- **Reranker — nothing is kept.** Each recall sends a query plus up to 32 candidates to `inferences-reranker`
+  and discards the scores. Training a reranker on real usage needs a new store of `(query, candidates, scores)`
+  plus which result was actually **used** — the last part is what turns a score into a label.
+- **Embedding — half of it.** Hindsight keeps each memory's text and its vector (`memory_units.embedding`, ~3,000
+  rows) and the graph around it (`memory_links` ~34,000, `entity_cooccurrences` ~13,000), but **no recall query
+  is stored anywhere**, and a stored vector carries **no model identity** — so swapping the embedder is
+  invisible in the data, which is precisely the change that is one-way.
+- **system-one — the model to copy.** The orchestrator's decisions store keeps `input_text` forever, append-only,
+  for this exact reason; an answer plus any human correction is the pair.
+- **Hindsight's own `llm_requests`** (504 rows) keeps its extraction model's prompt/response JSON. That is the
+  extraction LLM, not the retriever — do not mistake it for retrieval training data.
+- **Workers and gateway keep nothing**: both workers mount only their model weights and the DIP sockets.
+
+Constraints any implementation must honour: an asynchronous write off the hot path that never blocks or slows a
+request; a stated size bound and retention; the model id **and** revision recorded with every record so a swap is
+visible; no second source of truth for the services it observes; and a per-inference on/off flag the console can
+show. OCR, ASR and TTS follow the same rule when they exist.
+
 ## 12. OCR, ASR and TTS
 
 Present as intended rows in Fleet, with the truth in the state:

@@ -335,7 +335,7 @@ describe("FleetPage", () => {
       );
     });
 
-    it("ends a hung refresh at its deadline, reports it failed, and polls again", async () => {
+    it("ends a hung refresh at its deadline, says it has not answered, and polls again", async () => {
       const signals: AbortSignal[] = [];
       vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
         if (!input.endsWith("/workers")) return new Promise<Response>(() => undefined);
@@ -353,10 +353,11 @@ describe("FleetPage", () => {
       expect(signals).toHaveLength(2);
       expect(signals[1]?.aborted).toBe(false);
 
+      expect(5_000 + READ_DEADLINE_MS + 500).toBeLessThan(2 * 5_000 + READ_DEADLINE_MS);
       await act(() => vi.advanceTimersByTimeAsync(1_000));
       expect(signals[1]?.aborted).toBe(true);
       expect(screen.getByRole("status").textContent).toBe(
-        " · the latest refresh failed; this is the last good answer",
+        " · the latest refresh has not answered; this is the last good answer",
       );
       expect(
         within(r).getByText("ready", { exact: false, selector: "span[data-tone]" }).dataset.stale,
@@ -442,6 +443,25 @@ describe("FleetPage", () => {
       failing = true;
       await act(() => vi.advanceTimersByTimeAsync(35_000));
       expect(cellText(r, 3)).toBe("—");
+    });
+
+    it("never calls a hidden tab's answer late: no refresh is due while nothing polls", async () => {
+      let n = 0;
+      vi.stubGlobal("fetch", (input: string) => {
+        if (!input.endsWith("/workers")) return new Promise<Response>(() => undefined);
+        return ++n === 1 ? Promise.resolve(answered()) : new Promise<Response>(() => undefined);
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-embedding");
+      await turn("hidden");
+      const budget = 2 * 5_000 + READ_DEADLINE_MS;
+      await act(() => vi.advanceTimersByTimeAsync(3 * budget));
+      expect(n).toBe(1);
+      expect(
+        within(r).getByText("ready", { exact: false, selector: "span[data-tone]" }).dataset.stale,
+      ).toBeUndefined();
+      expect(within(r).queryByText(/^stale: not refreshed since/)).toBeNull();
+      expect(screen.getByRole("status").textContent).toBe(" · paused while this tab is hidden");
     });
 
     it("polls every 5 s while visible, stops while hidden, and says it is paused", async () => {

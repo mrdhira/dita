@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -54,5 +55,36 @@ func TestAMissingOrPlaceholderKeyIsNeverSent(t *testing.T) {
 		if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "DEEPSEEK_API_KEY") || calls.Load() != 0 {
 			t.Fatalf("key %q: %d %q, %d calls to DeepSeek", key, rec.Code, rec.Body, calls.Load())
 		}
+	}
+}
+
+func TestEveryRefusalAnswersInTheOneErrorShape(t *testing.T) {
+	unreachable := func(t *testing.T) *ChatHandler {
+		h := New(fakeKey, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		h.baseURL = "http://127.0.0.1:1"
+		return h
+	}
+	configured := func(t *testing.T) *ChatHandler { h, _ := deepseek(t, fakeKey); return h }
+	cases := []struct {
+		name      string
+		handler   func(*testing.T) *ChatHandler
+		body      string
+		status    int
+		errorType string
+	}{
+		{"no key", func(t *testing.T) *ChatHandler { h, _ := deepseek(t, ""); return h }, `{"message":"hello"}`, 503, "Unhealthy"},
+		{"an empty body", configured, "", 400, "Validation"},
+		{"malformed JSON", configured, "{", 400, "Validation"},
+		{"DeepSeek unreachable", unreachable, `{"message":"hello"}`, 500, "Backend"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := post(c.handler(t), c.body)
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != c.status ||
+				body["error_type"] != c.errorType || body["error"] == "" || rec.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("got %d %q %q (%v), want %d %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body, err, c.status, c.errorType)
+			}
+		})
 	}
 }

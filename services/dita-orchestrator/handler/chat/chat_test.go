@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -86,5 +87,28 @@ func TestEveryRefusalAnswersInTheOneErrorShape(t *testing.T) {
 				t.Fatalf("got %d %q %q (%v), want %d %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body, err, c.status, c.errorType)
 			}
 		})
+	}
+}
+
+// A reply can quote what was asked, and container logs are readable on the LAN.
+func TestTheReplyBodyIsNeverLogged(t *testing.T) {
+	const reply = `{"choices":[{"message":{"content":"REPLY-MARKER quoting the question"}}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(reply))
+	}))
+	t.Cleanup(srv.Close)
+	var logged bytes.Buffer
+	h := New(fakeKey, slog.New(slog.NewTextHandler(&logged, nil)))
+	h.baseURL = srv.URL
+
+	rec := post(h, `{"message":"hello"}`)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "REPLY-MARKER") {
+		t.Fatalf("the reply never reached the caller, so its absence from the log proves nothing: %d %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(logged.String(), "response chat completions from deepseek") {
+		t.Fatalf("the response line was not logged, so its content was never at risk: %q", logged.String())
+	}
+	if strings.Contains(logged.String(), "REPLY-MARKER") {
+		t.Fatalf("the reply body is in the log: %q", logged.String())
 	}
 }

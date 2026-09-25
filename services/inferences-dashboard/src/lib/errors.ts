@@ -3,7 +3,7 @@ import { ApiError, type Problem } from "../api/client";
 const isGatewayRead = (route: string | undefined) =>
   route === "/workers" || route?.startsWith("/metrics/") === true;
 
-/** A body the orchestrator, the gateway or a worker wrote names its error; a bare one came from in front. */
+/** The orchestrator writes every failure as JSON, a worker's wrapped: bare came from in front. */
 const fromServer = (p: Problem) =>
   p.error_type !== undefined || p.worker !== undefined || p.reason !== undefined;
 
@@ -21,8 +21,8 @@ function describeRead(route: string, problem: Problem) {
 }
 
 /**
- * What a person should read for a failed request. A 5xx is read from its body, never its route: only
- * a body that says so can mean a worker has no model or answered badly.
+ * What a person should read for a failed request. Whose fault a 5xx is comes from its body, never
+ * its route; the route only chooses the words for who answered (the gateway on its reads).
  */
 export function describeError(error: unknown): { title: string; detail: string } {
   if (!(error instanceof ApiError)) {
@@ -31,6 +31,9 @@ export function describeError(error: unknown): { title: string; detail: string }
   const { status, problem, route } = error;
   if (problem.error_type === "NotMetrics") {
     return { title: "The answer is not a worker's /metrics page", detail: problem.error };
+  }
+  if (problem.error_type === "Backend" && problem.worker !== undefined) {
+    return { title: `${problem.worker} answered ${status}`, detail: `${problem.error}.` };
   }
   const read = isGatewayRead(route);
   if (read && route) {

@@ -45,6 +45,16 @@ describe("DecidePage", () => {
       "The decision worker is not running",
     ],
     [
+      "the worker's own HTML 500, which the orchestrator relays as JSON naming the worker",
+      500,
+      {
+        error: "inferences-system-one answered 500 with a body of type text/html, not a JSON error",
+        error_type: "Backend",
+        worker: "inferences-system-one",
+      },
+      "inferences-system-one answered 500",
+    ],
+    [
       "Caddy's empty 502, the orchestrator down: not the worker",
       502,
       "",
@@ -72,7 +82,14 @@ describe("DecidePage", () => {
     await screen.findByRole("option", { name: /alert-triage v2/ });
     await userEvent.type(screen.getByRole("textbox"), "an alert");
     await userEvent.click(screen.getByRole("button", { name: "Decide" }));
-    expect((await screen.findByRole("alert")).textContent).toContain(message);
+    const alert = await screen.findByRole("alert");
+    const banner = alert.textContent;
+    expect(banner).toContain(message);
+    expect(banner).not.toContain("<");
+    if (message === "inferences-system-one answered 500") {
+      expect(alert.querySelector("p")?.textContent).toBe(message);
+      expect(banner).not.toMatch(/nothing about any worker/);
+    }
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       text: "an alert",

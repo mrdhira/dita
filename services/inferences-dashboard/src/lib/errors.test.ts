@@ -111,6 +111,27 @@ describe("describeError", () => {
       ],
       [
         undefined,
+        500,
+        {
+          error:
+            "inferences-system-one answered 500 with a body of type text/html, not a JSON error",
+          error_type: "Backend",
+          worker: "inferences-system-one",
+        },
+        "inferences-system-one answered 500",
+      ],
+      [
+        "/metrics/reranker",
+        404,
+        {
+          error: "inferences-reranker answered 404 with a body of type text/html, not a JSON error",
+          error_type: "Backend",
+          worker: "inferences-reranker",
+        },
+        "inferences-reranker answered 404",
+      ],
+      [
+        undefined,
         502,
         { error: "" },
         "The orchestrator, or something in front of it, answered 502",

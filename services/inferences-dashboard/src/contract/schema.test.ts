@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { draftSchema, issuePaths, templateFaults } from "./schema";
+import {
+  MAX_TEXT,
+  chars,
+  decisionRequestSchema,
+  draftSchema,
+  issuePaths,
+  templateFaults,
+} from "./schema";
 
 interface Case {
   name: string;
@@ -9,10 +16,17 @@ interface Case {
   issues: string[];
 }
 
+interface TextCase {
+  name: string;
+  repeat: string;
+  times: number;
+  issues: string[];
+}
+
 // The same file the orchestrator's Go suite reads: both sides must reach every verdict.
-const { cases } = JSON.parse(
+const { cases, texts } = JSON.parse(
   readFileSync(new URL("../../../../specs/decisions/schema-cases.json", import.meta.url), "utf8"),
-) as { cases: Case[] };
+) as { cases: Case[]; texts: TextCase[] };
 
 describe("the shared schema cases", () => {
   it("loaded", () => {
@@ -22,6 +36,21 @@ describe("the shared schema cases", () => {
     const parsed = draftSchema.safeParse(c.template);
     const paths = parsed.success ? [] : [...new Set(issuePaths(parsed.error))].sort();
     expect(paths).toEqual(c.issues);
+  });
+});
+
+describe("the shared text cases", () => {
+  it("hold a text of exactly MAX_TEXT characters and one of MAX_TEXT + 1", () => {
+    const lengths = texts.map((c) => chars(c.repeat.repeat(c.times)));
+    expect(lengths).toContain(MAX_TEXT);
+    expect(lengths).toContain(MAX_TEXT + 1);
+  });
+  it.each(texts.map((c) => [c.name, c] as const))("%s", (_, c) => {
+    const parsed = decisionRequestSchema.safeParse({
+      text: c.repeat.repeat(c.times),
+      schema: { name: "alert-triage", version: 1 },
+    });
+    expect(parsed.success ? [] : issuePaths(parsed.error)).toEqual(c.issues);
   });
 });
 

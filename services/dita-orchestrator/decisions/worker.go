@@ -7,9 +7,10 @@ import (
 	"sort"
 )
 
-// The worker's answer shape is not settled (the requirement's open question), so this file
-// is the only place that knows it. The shape below is the documented stub contract; when
-// inferences-system-one lands, this adapter changes and nothing else does.
+// This file is the only place that knows the worker's answer shape. inferences-system-one
+// answers in it (docs/inferences/system-one/[1]technical-requirement.md, "The contract"), and
+// adds act_probability, its escalate head: optional, checked when present, never stored apart
+// from the raw answer.
 
 // DecideRequest is the body sent to the worker's POST /decide.
 type DecideRequest struct {
@@ -18,9 +19,10 @@ type DecideRequest struct {
 }
 
 type workerAnswer struct {
-	Name          string             `json:"name"`
-	Probabilities map[string]float64 `json:"probabilities"`
-	Confidence    *float64           `json:"confidence"`
+	Name           string             `json:"name"`
+	Probabilities  map[string]float64 `json:"probabilities"`
+	Confidence     *float64           `json:"confidence"`
+	ActProbability *float64           `json:"act_probability"`
 }
 
 type workerReply struct {
@@ -80,6 +82,9 @@ func ParseReply(body []byte, questions []Question) (Reply, error) {
 		}
 		if a.Confidence == nil || !unit(*a.Confidence) {
 			return Reply{}, fmt.Errorf("the worker's confidence for %q is missing or outside [0, 1]", q.Name)
+		}
+		if a.ActProbability != nil && !unit(*a.ActProbability) {
+			return Reply{}, fmt.Errorf("the worker's act_probability for %q is outside [0, 1]", q.Name)
 		}
 		if len(a.Probabilities) != len(q.Options) {
 			return Reply{}, fmt.Errorf("the worker scored %d options for %q, it has %d", len(a.Probabilities), q.Name, len(q.Options))

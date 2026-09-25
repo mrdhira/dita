@@ -1,0 +1,41 @@
+[project]
+name = "inferences-system-one"
+version = "0.1.0"
+description = "System One worker: one resident decision model, DIP for its lifecycle, POST /decide for its answers"
+readme = "README.md"
+requires-python = ">=3.14.6"
+
+dependencies = [
+    "worker",
+    "textinfer",
+    "numpy>=2.5,<3",
+    "tokenizers>=0.23.2,<1",
+]
+
+[tool.uv.sources]
+worker = { workspace = true }
+textinfer = { workspace = true }
+torch = { index = "pytorch-cpu" }
+
+[dependency-groups]
+dev = ["coverage>=7.16.1,<8"]
+# The image's builder stage only: it exports the encoder to ONNX and proves the graph against
+# torch. Never a default group, so neither the runtime image nor the test env ever has torch.
+export = [
+    "torch>=2.14,<3",
+    "transformers>=5.17,<6",
+    "onnxscript>=0.7.2,<1",
+    "onnx>=1.23,<2",
+    "safetensors>=0.8,<1",
+]
+
+[[tool.uv.index]]
+# The CPU wheels: PyPI's Linux torch pulls in gigabytes of CUDA libraries.
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv]
+# An application, not a library: uv installs its dependencies but never builds or
+# publishes it. Shared code under packages/ stays installable.
+package = false

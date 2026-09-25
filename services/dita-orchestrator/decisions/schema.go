@@ -35,12 +35,14 @@ type Range struct {
 	Max float64 `json:"max"`
 }
 
-// Question is one question in the `POST /decide` shape.
+// Question is one question in the `POST /decide` shape. Criteria is what the worker's model
+// reads as the question's instructions; without it the model sees only the name.
 type Question struct {
-	Name    string   `json:"name"`
-	Type    string   `json:"type"`
-	Options []string `json:"options"`
-	Range   *Range   `json:"range,omitempty"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Options  []string `json:"options"`
+	Range    *Range   `json:"range,omitempty"`
+	Criteria string   `json:"criteria,omitempty"`
 }
 
 // Draft is what a caller submits to create a template version.
@@ -94,6 +96,8 @@ func ValidateDraft(d Draft) []Issue {
 		}
 		if len(q.Options) < MinOptions || len(q.Options) > MaxOptions {
 			add(at+".options", "between %d and %d options", MinOptions, MaxOptions)
+		} else if q.Type == "noul" && !falseTrue(q.Options) {
+			add(at+".options", "a noul is answered only as false and true, so its options are exactly those")
 		}
 		options := map[string]bool{}
 		for j, o := range q.Options {
@@ -122,6 +126,10 @@ func ValidateText(text string) []Issue {
 		return []Issue{{Path: "text", Message: fmt.Sprintf("the text is 1-%d characters and not blank", MaxText)}}
 	}
 	return nil
+}
+
+func falseTrue(options []string) bool {
+	return len(options) == 2 && ((options[0] == "false" && options[1] == "true") || (options[0] == "true" && options[1] == "false"))
 }
 
 func validType(t string) bool {

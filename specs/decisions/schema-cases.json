@@ -29,9 +29,8 @@
             "name": "a",
             "type": "noul",
             "options": [
-              "yes",
-              "no",
-              "unknown"
+              "false",
+              "true"
             ]
           },
           {
@@ -817,6 +816,85 @@
         "questions.0.type",
         "questions.1.name"
       ]
+    },
+    {
+      "name": "a noul in its own labels is refused",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "fraud",
+            "type": "noul",
+            "options": [
+              "yes",
+              "no"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a noul with a third option is refused",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "fraud",
+            "type": "noul",
+            "options": [
+              "false",
+              "true",
+              "unknown"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a noul answers false and true in either order",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "needs_human",
+            "type": "noul",
+            "options": [
+              "true",
+              "false"
+            ]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "criteria are the model's instructions",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "criteria": "How severe is this homelab alert?"
+          }
+        ]
+      },
+      "issues": []
     }
   ]
 }

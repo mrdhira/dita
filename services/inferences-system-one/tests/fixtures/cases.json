@@ -1,0 +1,135 @@
+[
+ {
+  "name": "real-immich-oom",
+  "state": "alert: service immich stopped responding; container exited with code 137 (OOM) after 3 restarts in 10 minutes",
+  "questions": {
+   "severity": {
+    "type": "choice",
+    "criteria": [
+     "info",
+     "warning",
+     "critical"
+    ],
+    "instructions": "This is an alert from a homelab monitoring system. How severe is it for the person who runs the homelab?"
+   },
+   "needs_human": {
+    "type": "noul",
+    "instructions": "Does this homelab alert need a human to intervene, rather than resolving on its own?"
+   }
+  }
+ },
+ {
+  "name": "disk-info-dict-state",
+  "state": {
+   "host": "nas01",
+   "check": "disk usage",
+   "value": "41%",
+   "threshold": "85%",
+   "message": "weekly scrub finished, 0 errors"
+  },
+  "questions": {
+   "severity": {
+    "type": "choice",
+    "criteria": {
+     "info": "routine, nothing to do",
+     "warning": "degrading, look soon",
+     "critical": "broken or losing data now"
+    },
+    "instructions": "How severe is this homelab monitoring event?"
+   },
+   "needs_human": {
+    "type": "noul",
+    "instructions": "Does this event need a human to act?"
+   }
+  }
+ },
+ {
+  "name": "de-ticket-5way-score",
+  "state": "Hallo, seit dem Update gestern startet der Jellyfin-Container nicht mehr. Im Log steht 'permission denied' auf /config. Ich habe nichts an den Rechten geändert.",
+  "questions": {
+   "component": {
+    "type": "choice",
+    "criteria": [
+     "storage",
+     "network",
+     "permissions",
+     "database",
+     "gpu"
+    ],
+    "instructions": "Which component is most likely the cause of the problem in the message?"
+   },
+   "urgency": {
+    "type": "score",
+    "criteria": [
+     "not urgent",
+     "can wait a day",
+     "should be fixed today",
+     "blocking right now"
+    ],
+    "instructions": "How urgent is the problem for the user?"
+   },
+   "is_question": {
+    "type": "noul",
+    "instructions": "Is the sender asking a question?"
+   }
+  }
+ },
+ {
+  "name": "long-journal-over-window",
+  "state": "Sep 23 03:00:11 srv kernel: [1000.412] Out of memory: Killed process 3100 (postgres) total-vm:812000kB, anon-rss:601000kB\nSep 23 03:01:12 srv systemd[1]: docker-0001.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:02:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:03:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:04:11 srv kernel: [1028.412] Out of memory: Killed process 3104 (postgres) total-vm:812400kB, anon-rss:601200kB\nSep 23 03:05:12 srv systemd[1]: docker-0005.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:06:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:07:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:08:11 srv kernel: [1056.412] Out of memory: Killed process 3108 (postgres) total-vm:812800kB, anon-rss:601400kB\nSep 23 03:09:12 srv systemd[1]: docker-0009.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:10:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:11:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:12:11 srv kernel: [1084.412] Out of memory: Killed process 3112 (postgres) total-vm:813200kB, anon-rss:601600kB\nSep 23 03:13:12 srv systemd[1]: docker-000d.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:14:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:15:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:16:11 srv kernel: [1112.412] Out of memory: Killed process 3116 (postgres) total-vm:813600kB, anon-rss:601800kB\nSep 23 03:17:12 srv systemd[1]: docker-0011.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:18:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:19:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:20:11 srv kernel: [1140.412] Out of memory: Killed process 3120 (postgres) total-vm:814000kB, anon-rss:602000kB\nSep 23 03:21:12 srv systemd[1]: docker-0015.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:22:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:23:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:24:11 srv kernel: [1168.412] Out of memory: Killed process 3124 (postgres) total-vm:814400kB, anon-rss:602200kB\nSep 23 03:25:12 srv systemd[1]: docker-0019.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:26:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:27:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:28:11 srv kernel: [1196.412] Out of memory: Killed process 3128 (postgres) total-vm:814800kB, anon-rss:602400kB\nSep 23 03:29:12 srv systemd[1]: docker-001d.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:30:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:31:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:32:11 srv kernel: [1224.412] Out of memory: Killed process 3132 (postgres) total-vm:815200kB, anon-rss:602600kB\nSep 23 03:33:12 srv systemd[1]: docker-0021.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:34:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:35:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s\nSep 23 03:36:11 srv kernel: [1252.412] Out of memory: Killed process 3136 (postgres) total-vm:815600kB, anon-rss:602800kB\nSep 23 03:37:12 srv systemd[1]: docker-0025.scope: A process of this unit has been killed by the OOM killer.\nSep 23 03:38:13 srv dockerd[811]: container immich_postgres exited (137), restarting\nSep 23 03:39:14 srv immich-server[4412]: ERROR connection to database refused, retrying in 5s",
+  "questions": {
+   "severity": {
+    "type": "choice",
+    "criteria": [
+     "info",
+     "warning",
+     "critical"
+    ],
+    "instructions": "This is a systemd journal excerpt from a homelab server. How severe is the situation?"
+   },
+   "root_cause": {
+    "type": "choice",
+    "criteria": {
+     "disk": "disk full or failing",
+     "memory": "out of memory",
+     "network": "DNS or connectivity",
+     "config": "bad configuration"
+    },
+    "instructions": "What is the most likely root cause?"
+   }
+  }
+ },
+ {
+  "name": "ja-backup-ok",
+  "state": "バックアップジョブ restic-daily は正常に完了しました。転送量 2.3 GB、所要時間 14 分、エラーなし。",
+  "questions": {
+   "severity": {
+    "type": "choice",
+    "criteria": [
+     "info",
+     "warning",
+     "critical"
+    ],
+    "instructions": "How severe is this homelab notification?"
+   },
+   "needs_human": {
+    "type": "noul",
+    "instructions": "Does this notification need a human to act?",
+    "criteria": {
+     "true": "someone must do something",
+     "false": "no action needed"
+    }
+   }
+  }
+ },
+ {
+  "name": "single-noul",
+  "state": "cert-manager: certificate home-lab-tls expires in 2 days; renewal failed: ACME challenge timeout",
+  "questions": {
+   "needs_human": {
+    "type": "noul",
+    "instructions": "Does this need a human to act?"
+   }
+  }
+ }
+]

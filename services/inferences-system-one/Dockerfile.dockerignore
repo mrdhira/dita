@@ -1,0 +1,28 @@
+# Read by BuildKit because it sits beside the Dockerfile; a .dockerignore in this directory
+# would not be, since the context is the repo root. Without it the weights are the context.
+# tests/ stays in: the parity stage runs the guard inside the build.
+**/models/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.coverage
+run/
+docs/
+specs/
+packages/golibs/
+packages/pylibs/*/tests/
+deployment/
+services/*
+!services/*/pyproject.toml
+!services/inferences-system-one/
+# The last matching pattern wins, so the re-include above undoes the ** exclusions for this
+# service: they are repeated here, after it. Without them the context is the weights, the graph
+# and the export's torch venv (2.9 GB), and host .pyc files reach the image.
+services/inferences-system-one/README.md
+services/inferences-system-one/models/
+services/inferences-system-one/**/__pycache__/
+services/inferences-system-one/**/*.pyc
+services/inferences-system-one/.coverage
+.claude/
+.github/
+.git/

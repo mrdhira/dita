@@ -101,21 +101,19 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, name, path str
 		Transport: g.proxy,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			reason := WriteUnavailable(w, r.Context(), worker, g.cfg.Timeout, err)
-			g.log.WarnContext(r.Context(), "inference worker did not answer",
-				slog.String("worker", name), slog.String("reason", reason), slog.Any("err", err))
+			g.log.WarnContext(r.Context(), "inference worker did not answer", slog.String("worker", name),
+				slog.String("url", worker.URL.String()), slog.String("reason", reason), slog.Any("err", err))
 		},
 	}
 	proxy.ServeHTTP(w, r)
 }
 
 // WriteUnavailable answers for a worker that gave no response at all, the way every gateway
-// route does, and returns the reason it wrote.
+// route does, and returns the reason it wrote. The worker's address and the transport error are
+// for the log, which the caller writes; the answer names only the worker and the reason.
 func WriteUnavailable(w http.ResponseWriter, ctx context.Context, worker Worker, timeout time.Duration, err error) string {
 	status, reason := classify(ctx, err)
-	writeJSON(w, status, failure{
-		Error: describe(worker, reason, timeout, err), ErrorType: "Unhealthy",
-		Worker: worker.Name, URL: worker.URL.String(), Reason: reason,
-	})
+	writeJSON(w, status, failure{Error: tell(worker.Name, reason, timeout), ErrorType: "Unhealthy", Worker: worker.Name, Reason: reason})
 	return reason
 }
 
@@ -125,8 +123,20 @@ type failure struct {
 	Error     string `json:"error"`
 	ErrorType string `json:"error_type"`
 	Worker    string `json:"worker"`
-	URL       string `json:"url,omitempty"`
 	Reason    string `json:"reason"`
+}
+
+func tell(name, reason string, timeout time.Duration) string {
+	switch reason {
+	case "not_running":
+		return name + " is not running"
+	case "busy":
+		return name + " is at its connection limit; retry shortly"
+	case "timeout":
+		return fmt.Sprintf("%s did not answer within %s", name, timeout)
+	default:
+		return name + " could not be reached"
+	}
 }
 
 // classify turns a transport failure into a status and a reason. "not_running" is only

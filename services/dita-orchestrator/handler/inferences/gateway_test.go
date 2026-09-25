@@ -196,6 +196,9 @@ func TestAWorkerThatDoesNotAnswer(t *testing.T) {
 			if !strings.Contains(got.Error, c.mentions) {
 				t.Fatalf("error %q does not say %q", got.Error, c.mentions)
 			}
+			if body := rec.Body.String(); strings.Contains(body, c.url.Host) || strings.Contains(body, "http://") {
+				t.Fatalf("the answer leaks the worker's address: %s", body)
+			}
 		})
 	}
 }
@@ -316,6 +319,35 @@ func TestHealthIsTheGatewaysOwn(t *testing.T) {
 	}
 }
 
+func TestTheAPITokenIsOptInAndRefusedWhenWeak(t *testing.T) {
+	strong := strings.Repeat("a1", 16)
+	cases := []struct{ name, raw, want, err string }{
+		{"unset leaves the routes open", "", "", ""},
+		{"a 32-character token", strong, strong, ""},
+		{"a short token", "secret", "", "at least 32"},
+		{"a token with a trailing newline", strong + "\n", "", "surrounding space"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := ConfigFromEnv(func(k string) string {
+				if k == "INFERENCES_API_TOKEN" {
+					return c.raw
+				}
+				return ""
+			})
+			if c.err != "" {
+				if err == nil || !strings.Contains(err.Error(), c.err) {
+					t.Fatalf("err %v, want one mentioning %q", err, c.err)
+				}
+				return
+			}
+			if err != nil || cfg.APIToken != c.want {
+				t.Fatalf("token %q, err %v; want %q", cfg.APIToken, err, c.want)
+			}
+		})
+	}
+}
+
 func TestConfigFromEnv(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -377,4 +409,60 @@ func compact(t *testing.T, raw []byte) string {
 		t.Fatal(err)
 	}
 	return out.String()
+}
+
+func TestTheProxyTimeoutMustOutlastTheWorkersDeadline(t *testing.T) {
+	info := func(body string) *url.URL {
+		return start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/info" {
+				w.Write([]byte(body))
+			}
+		}))
+	}
+	cases := []struct {
+		name     string
+		timeout  time.Duration
+		worker   *url.URL
+		checked  bool
+		mentions string
+	}{
+		{"120 s over the worker's 100 s", 120 * time.Second, info(`{"deadline_s": 100.0}`), true, ""},
+		{"90 s under it", 90 * time.Second, info(`{"deadline_s": 100.0}`), true, "does not outlast"},
+		{"exactly equal", 100 * time.Second, info(`{"deadline_s": 100.0}`), true, "does not outlast"},
+		{"a worker that publishes no deadline", 90 * time.Second, info(`{}`), false, ""},
+		{"a worker not up yet", 90 * time.Second, closedURL(t), false, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := New(Config{Timeout: c.timeout, ProbeTimeout: time.Second, Workers: []Worker{{Name: SystemOne, URL: c.worker}}},
+				slog.New(slog.NewTextHandler(io.Discard, nil)))
+			checked, err := g.CheckWorkerDeadline(context.Background())
+			if checked != c.checked || (c.mentions == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.mentions)) {
+				t.Fatalf("checked %v, err %v; want checked %v mentioning %q", checked, err, c.checked, c.mentions)
+			}
+		})
+	}
+}
+
+func TestABodyWithoutALengthIsBufferedOnlyUpToTheCap(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		size   int
+		status int
+	}{{"exactly the cap", maxBufferedBody, 200}, {"one byte over", maxBufferedBody + 1, 413}} {
+		t.Run(c.name, func(t *testing.T) {
+			up := &upstream{status: 200}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{Embedding: start(t, up)})
+			req := httptest.NewRequest(http.MethodPost, "/api/inferences/embed", bytes.NewReader(bytes.Repeat([]byte("x"), c.size)))
+			req.ContentLength = -1
+			rec := httptest.NewRecorder()
+			gw.ServeHTTP(rec, req)
+			up.mu.Lock()
+			reached := up.body != nil
+			up.mu.Unlock()
+			if rec.Code != c.status || reached != (c.status == 200) {
+				t.Fatalf("%d bytes without a length: %d, worker reached %v", c.size, rec.Code, reached)
+			}
+		})
+	}
 }

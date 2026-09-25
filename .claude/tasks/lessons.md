@@ -55,3 +55,12 @@
   counter. The unit tests passed: the fixture was real, the label was the invention.
 - **Rule:** before titling a series, read its `# HELP` and one live scrape, and check which path
   increments it. Where two paths exist (DIP and HTTP), say which one the number covers.
+
+## Absence of data is not a state
+- **Pattern:** the console printed "No model is resident … requests fail" whenever `/info` was
+  null, which is also what a pending query, a failed gateway, a `busy` worker and a failed second
+  probe look like. A `ready · serving` row said "none resident" beside itself.
+- **Rule:** before rendering a claim from a null, list every path that produces that null. Claim
+  the state only from the field that reports it (`state === "no_model"`); every other null is
+  "unknown", said as such.
+- **Check:** grep the UI for negative claims ("no", "none", "not") and find each one's source field.

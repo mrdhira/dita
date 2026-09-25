@@ -26,6 +26,18 @@
   `infer_duration` histogram's `_count`.
 - Not done: dark mode (§13), Lighthouse (§14), per-container Dozzle deep link.
 
+## Review fixes (`.claude/tasks/console-r1-review-fixes.md`, review at `/tmp/console_review.md`)
+- [x] MUST 1: `residentOf` — "none resident" only on `no_model`; a missing /info is "unknown".
+- [x] MUST 2: stale warning tested; a failed refresh marks the badge `stale` and says since when.
+- [x] SHOULD 3: a non-`text/plain` 200, or one with no recognised series, is an error.
+- [x] SHOULD 4: Go — query recorded and asserted, 502 `too_large` over the bound, non-200 pinned.
+- [x] SHOULD 5: provenance reads true; drift reported, nothing redeployed.
+- [x] SHOULD 6: only the paused/failed notes are a live region.
+- [x] NITs: strip vocabulary, footnote, `0.0 s`, Overview as-of, Models identity, resident-for column, untested strings, 10 s / 30 s polling.
+- Also: `describeError` called any 503 "no model loaded", including gateway `unreachable`.
+- Mutation: 5 Go mutants (A, B1, B2, C, D) and 19 dashboard mutants (incl. the reviewer's E, F, G), all killed.
+- Landing chunk 115.31 kB gzip (was 113.38): Fleet's resident-for column pulls the metrics parser in.
+
 # Addendum: audit findings (`/mnt/data/workspaces/hardening-lane-b-addendum.md`), in priority order
 Supersedes the Caddy `header_up` design and the "same wording" pre-check below.
 

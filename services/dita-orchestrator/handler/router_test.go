@@ -203,6 +203,35 @@ func TestTheTokenGuardsEveryWriteOnlyWhenSet(t *testing.T) {
 	})
 }
 
+func TestTheRoutersOwnRefusalsAnswerInTheOneErrorShape(t *testing.T) {
+	call := serve(t, "", openStore(t))
+	cases := []struct {
+		name, method, path string
+		status             int
+		errorType, error   string
+	}{
+		{"no route", "GET", "/api/inferences/nope", 404, "NotFound", "no route for GET /api/inferences/nope"},
+		{"a route, another method", "GET", "/api/inferences/embed", 405, "MethodNotAllowed", "GET is not served on /api/inferences/embed; allowed: POST"},
+		{"a handler's own 404 passes through", "GET", "/api/inferences/decisions/nope", 404, "NotFound", "not found"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := call(c.method, c.path, "", nil)
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != c.status ||
+				body["error_type"] != c.errorType || body["error"] != c.error {
+				t.Fatalf("got %d %q (%v), want %d %s %q", rec.Code, rec.Body, err, c.status, c.errorType, c.error)
+			}
+			if got := rec.Header().Get("Content-Type"); got != jsonType {
+				t.Fatalf("content type %q", got)
+			}
+		})
+	}
+	if rec := call("GET", "/api/inferences/embed", "", nil); rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("a 405 lost its Allow header: %v", rec.Header())
+	}
+}
+
 func TestARecoveredPanicAnswersInTheOneErrorShape(t *testing.T) {
 	call := serve(t, "", nil)
 	rec := call("GET", "/api/inferences/schemas", "", nil)

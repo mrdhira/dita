@@ -31,6 +31,7 @@ func NewRouter(logger *slog.Logger, addr string, chatHandler *chat.ChatHandler, 
 		middleware.Recover(middleware.RecoverConfig{Log: logger, ErrorWriter: func(w http.ResponseWriter, _ *http.Request, status int, _ string) {
 			refuse(w, status, "Backend", "the orchestrator failed while answering; the log has the details")
 		}}),
+		unrouted,
 	)
 
 	write := guardWrites(apiToken)
@@ -100,6 +101,44 @@ func guardWrites(token string) func(http.HandlerFunc) http.HandlerFunc {
 		}
 	}
 }
+
+// unrouted answers the mux's own 404 and 405 in the one error shape. It must be the innermost
+// middleware: the mux sets r.Pattern on the request it is handed, and only when a route matched,
+// so a handler's own 404 passes through untouched.
+func unrouted(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&unroutedWriter{ResponseWriter: w, r: r}, r)
+	})
+}
+
+type unroutedWriter struct {
+	http.ResponseWriter
+	r        *http.Request
+	replaced bool
+}
+
+func (u *unroutedWriter) WriteHeader(status int) {
+	if u.r.Pattern != "" || (status != http.StatusNotFound && status != http.StatusMethodNotAllowed) {
+		u.ResponseWriter.WriteHeader(status)
+		return
+	}
+	u.replaced = true
+	if status == http.StatusNotFound {
+		refuse(u.ResponseWriter, status, "NotFound", "no route for "+u.r.Method+" "+u.r.URL.Path)
+		return
+	}
+	refuse(u.ResponseWriter, status, "MethodNotAllowed", u.r.Method+" is not served on "+u.r.URL.Path+"; allowed: "+u.Header().Get("Allow"))
+}
+
+func (u *unroutedWriter) Write(b []byte) (int, error) {
+	if u.replaced {
+		return len(b), nil
+	}
+	return u.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach the flusher the reverse proxy needs.
+func (u *unroutedWriter) Unwrap() http.ResponseWriter { return u.ResponseWriter }
 
 // refuse answers in the one error shape every route and every worker uses: {error, error_type}.
 func refuse(w http.ResponseWriter, status int, errorType, message string) {

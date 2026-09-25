@@ -14,7 +14,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if !configured(h.APIKey) {
-		http.Error(w, "chat is not configured: DEEPSEEK_API_KEY is missing or a placeholder", http.StatusServiceUnavailable)
+		refuse(w, http.StatusServiceUnavailable, "Unhealthy", "chat is not configured: DEEPSEEK_API_KEY is missing or a placeholder")
 		return
 	}
 
@@ -26,10 +26,10 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error when reading request body", slog.Any("err", err))
 		if errors.Is(err, io.EOF) {
-			http.Error(w, "request body cannot be empty", http.StatusBadRequest)
+			refuse(w, http.StatusBadRequest, "Validation", "request body cannot be empty")
 			return
 		}
-		http.Error(w, "malformed JSON payload: "+err.Error(), http.StatusBadRequest)
+		refuse(w, http.StatusBadRequest, "Validation", "malformed JSON payload: "+err.Error())
 		return
 	}
 
@@ -55,14 +55,14 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	reqBodyJSON, err := json.Marshal(reqBody)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error when marshal request json", slog.Any("err", err))
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		refuse(w, http.StatusInternalServerError, "Backend", "internal server error")
 		return
 	}
 
 	req, err := http.NewRequest("POST", h.baseURL+"/chat/completions", bytes.NewBuffer(reqBodyJSON))
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error when creating new http request", slog.Any("err", err))
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		refuse(w, http.StatusInternalServerError, "Backend", "internal server error")
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.apiClient.Do(req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error when request chat completions to deepseek", slog.Any("err", err))
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		refuse(w, http.StatusInternalServerError, "Backend", "internal server error")
 		return
 	}
 	defer resp.Body.Close()
@@ -80,7 +80,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error when read response chat completions from deepseek", slog.Any("err", err))
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		refuse(w, http.StatusInternalServerError, "Backend", "internal server error")
 		return
 	}
 
@@ -92,4 +92,11 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
+}
+
+// refuse answers in the error shape every other route uses: {error, error_type}.
+func refuse(w http.ResponseWriter, status int, errorType, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "error_type": errorType})
 }

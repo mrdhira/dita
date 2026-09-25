@@ -417,6 +417,12 @@ func TestAnEvaluationIsBoundedBeforeItIsBuilt(t *testing.T) {
 	if code, _, body := e.call("POST", "/evaluations", evaluationBody(decisions.MaxRows+1)); code != 400 || !strings.Contains(body, "between 1 and 10000 rows") {
 		t.Fatalf("MaxRows+1 rows: %d %s", code, body)
 	}
+	// decisions.Evaluate refuses MaxRows+1 with the same words, so only a row the decoder would
+	// itself refuse shows whether the handler stopped before building it.
+	unread := strings.TrimSuffix(evaluationBody(decisions.MaxRows), "]}") + `,{"unknown":1}]}`
+	if code, _, body := e.call("POST", "/evaluations", unread); code != 400 || !strings.Contains(body, "between 1 and 10000 rows") {
+		t.Fatalf("row MaxRows+1 was decoded: %d %s", code, body)
+	}
 
 	huge := evaluationBody(3 * decisions.MaxRows)
 	reader := &countingReader{r: strings.NewReader(huge)}
@@ -514,6 +520,24 @@ func TestOneUnreadableRecordNeverFailsTheHistory(t *testing.T) {
 	}
 	if code, _, body := reloaded.call("POST", "/decisions/old/correction", `{"answers":{"severity":"low","fraud":"true"}}`); code != 422 || !strings.Contains(body, "Unreadable") {
 		t.Fatalf("correcting it: %d %s", code, body)
+	}
+}
+
+// A directory where the file should be makes every append fail, for root as well.
+func TestACorrectionThatCannotBeWrittenIsNotReportedAsMade(t *testing.T) {
+	dir := t.TempDir()
+	e := newEnv(t, dir, worker(t, 200, stubReply))
+	e.call("POST", "/schemas", draft)
+	_, made, _ := e.call("POST", "/decisions", decide)
+	id := made["id"].(string)
+	if err := os.Mkdir(filepath.Join(dir, "corrections.jsonl"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, body := e.call("POST", "/decisions/"+id+"/correction", `{"answers":{"severity":"high","fraud":"true"}}`); code != 500 || !strings.Contains(body, `"error_type":"Backend"`) {
+		t.Fatalf("a correction that was never written: %d %s", code, body)
+	}
+	if _, got, _ := e.call("GET", "/decisions/"+id, ""); got["correction"] != nil {
+		t.Fatalf("a correction that was never written is attached: %v", got["correction"])
 	}
 }
 

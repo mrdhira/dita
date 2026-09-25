@@ -288,11 +288,15 @@ than hanging), a 30 s default, and leaving the server write deadline at w-tools'
 - [ ] **Follow-up:** `INFERENCES_API_TOKEN` is unset in the deployment, so the write routes are open to anyone who
   can reach the gateway and the worker routes answer without a token. The code path exists and is tested (`401`
   when set); the deployment does not set it.
-- [ ] **Follow-up:** chat and the router's own `404`/`405` answer plain text while every handler answers the
-  standard error shape. Nothing parses them yet; a client that does will notice.
-- [ ] **Follow-up:** four mutations are known to survive the suite — removing the `fsync`, a failed write inside
+- [x] **Follow-up:** chat and the router's own `404`/`405` answer plain text while every handler answers the
+  standard error shape. *Closed:* both answer `{error, error_type}` now — `NotFound` and `MethodNotAllowed` (the
+  `Allow` header kept) from the router, `Validation`, `Unhealthy` and `Backend` from chat. DeepSeek's own answer is
+  still passed through as it came.
+- [x] **Follow-up:** four mutations are known to survive the suite — removing the `fsync`, a failed write inside
   `Correct` being ignored, `Evaluate`'s own row cap, and the dashboard's `MAX_TEXT` — and chat no longer logging
-  the reply body has no test that would notice its return.
+  the reply body has no test that would notice its return. *Closed:* each of the last four, and the reply body,
+  now has a test that goes red under the mutation. The `fsync` stays untested by decision: its absence is only
+  observable across a power loss, and the most it loses is the last append-only line, which a restart tolerates.
 - [ ] **Follow-up:** the workers' eight-slot HTTP cap is held by idle keep-alive connections.
   Hindsight's pooled client filled all eight on the embedding worker while this was being
   verified (`refusing a scrape: 8 already open`), and `/health` was refused with it. The gateway

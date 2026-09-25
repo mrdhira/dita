@@ -17,7 +17,7 @@ services:
       METRICS_ADDR: 0.0.0.0:8080
       # Stands in for the orchestrator until it drives this worker: something must load the
       # model before the memory service's first recall. A DIP `load` or `unload` still rules.
-      PRELOAD_MODEL: qwen3-reranker-0.6b
+      PRELOAD_MODEL: jina-reranker-v1-turbo-en
       RERANKER_THREADS: "4"
       RERANKER_LOG_LEVEL: info
     # No ports: Caddy fronts anything public, and the memory containers use the name.

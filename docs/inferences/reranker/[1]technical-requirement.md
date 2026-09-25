@@ -116,17 +116,33 @@ requests inside at once; past that, 429 at once rather than a queue.
 
 ### Data model
 
-`models.yaml`, one model. The files come from two repositories on purpose:
+`models.yaml` lists the models this service can serve; exactly one is active — `default_model`,
+mirrored by `PRELOAD_MODEL` in `compose.yaml`, and both must name a model that is not commented out.
+As of 2026-09-25 the active model is `jina-reranker-v1-turbo-en`. It replaced the fp16 Qwen3
+reranker because the cross-encoder is **99.2% of a memory recall's latency** on this box (30.4 s of a
+30.6 s recall, traced per phase), turbo-en scores ~10-40x cheaper per pair, and every memory in the
+bank is English — the multilingual ability we were paying for was unused. Its graph is the official
+export, so one repository suffices:
 
 | file | from | why |
 | --- | --- | --- |
-| `onnx/model.onnx` (1.19 GB, fp16) | `shawnw3i/Qwen3-Reranker-0.6B-seq-cls-ONNX` @ `e5d273d8` | no official or `onnx-community` ONNX export exists |
-| `tokenizer.json` | `Qwen/Qwen3-Reranker-0.6B` @ `e61197ed` | the export's copy is byte-identical; pinning the official one keeps the third party to the graph alone |
+| `onnx/model.onnx` (151 MB, fp32) | `jinaai/jina-reranker-v1-turbo-en` @ `b8c14f4e` | official ONNX export; fp32 because onnxruntime has no fp16 kernels without AVX-512 and int8 wants VNNI this CPU lacks |
+
+`jina-reranker-v2-base-multilingual` is recorded in the same file as a **commented entry**: the
+multilingual (en/id/ja) 12-layer model, 1.11 GB of weights against turbo-en's 147 MB. Switching is one
+move (uncomment, fetch, point `default_model` and `PRELOAD_MODEL` at it) and is deferred until memory is
+first retained in Indonesian or Japanese, or until turbo-en is measured to rank worse on our own data.
+The model before that, `Qwen3-Reranker-0.6B` (fp16, 1.19 GB, `shawnw3i/…` graph plus the Qwen
+tokenizer), was the highest-quality scorer measured at ~0.65-0.68 s per pair; it is history now.
+
+Either way, **nothing about the stored memories changes**: the reranker only reorders the candidates
+retrieval already found, so there is no re-embedding, no re-ingestion and no re-consolidation.
 
 | option | meaning |
 | --- | --- |
 | `onnx`, `tokenizer`, `pad_token`, `output` | the graph, its tokenizer, the padding token, the output to read (`logits`, one per pair) |
-| `prefix`, `suffix`, `instruction` | the model card's prompt, verbatim; see below |
+| `body` | the pair as one template. Defaults to the Qwen card's prompt; a model with its own pair format sets it (jina reads a RoBERTa pair, `{query}</s></s>{text}`). Validated: `{query}` and `{text}` exactly once, nothing outside those three placeholders |
+| `prefix`, `suffix`, `instruction` | the Qwen card's prompt, verbatim; optional, and empty for a model that sets its own `body` |
 | `max_sequence_length` | the card's context, 32768, recorded for the reader |
 | `max_input_tokens` | the most one pair may be, prompt included: **1024**, measured |
 | `max_batch_tokens` | the padded-token budget of one graph run: **1024**, measured |
@@ -134,20 +150,27 @@ requests inside at once; past that, 429 at once rather than a queue.
 
 ### How a pair becomes a score
 
-The graph is Qwen3-Reranker converted to `Qwen3ForSequenceClassification` with one label:
-its logit is the original model's `yes` logit minus its `no` logit at the last token.
-`sigmoid` of that difference is exactly the official score, `softmax([no, yes])[yes]`, and
-it is exactly TEI's single-logit score. Each pair is:
+The active graph is a reranker converted to a one-logit sequence classifier, and that single logit is
+the score: `sigmoid` of it is the model's published relevance. For the Qwen3 graph this service was
+built around, the logit is the original model's `yes` logit minus its `no` logit, which is exactly
+`softmax([no, yes])[yes]` and exactly TEI's single-logit score; jina's cross-encoders are trained with
+that one logit already, so the reading is the same. Each pair is:
 
 ```
-<prefix> + tokenize("<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {text}") + <suffix>
+<prefix> + tokenize(<body>) + <suffix>
 ```
 
-with the prefix and suffix tokenised without special tokens and the body with the
-tokenizer's defaults, exactly as the card's reference code does. This tokenizer's
-post-processor adds nothing, so the pair ends on the suffix's last token, where the score is
-read. The instruction is the card's default, `Given a web search query, retrieve relevant
-passages that answer the query`; TEI's request has no field for it, so it is configuration.
+with the prefix and suffix tokenised without special tokens and the body with the tokenizer's defaults,
+exactly as the model's reference code does. `<body>` is the model's own pair template: the Qwen string
+by default, and for jina a RoBERTa pair, `{query}</s></s>{text}` — its tokenizer's post-processor wraps a
+pair as `<s> A </s></s> B </s>`, so writing the separators into the string is what reproduces the
+reference's own `tokenize(query, text)`. A test holds the chosen body's ids to the tokenizer's pair
+encoding, so a body that does not reproduce the reference fails the build rather than quietly scoring
+garbage (`make parity`).
+
+For the Qwen graph the instruction is configuration, because TEI's request has no field for it: the
+card's default is `Given a web search query, retrieve relevant passages that answer the query`. A model
+that sets its own `body` needs no instruction, so its entry omits the three prompt fields entirely.
 
 **Truncation cuts only the document.** The token where the document starts is found from the
 encoding's offsets, and only tokens after it are dropped, from the end (`right`) or the start

@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 import numpy as np
-from tokenizers import Tokenizer, models, pre_tokenizers
+from tokenizers import AddedToken, Tokenizer, models, pre_tokenizers, processors
 
 from reranker_worker.engines.cross_encoder import Reranker, RerankerConfig, RerankRequest
 from worker import Engine, Result
 
 WORDS = ["judge:", "answer:", "<Instruct>:", "<Query>:", "<Document>:", "find", "it", "relevant",
-         "noise", "mars", "red", "planet"]
+         "noise", "mars", "red", "planet", "<s>", "</s>"]
 VOCAB = {"<pad>": 0, "<unk>": 1, **{w: i + 2 for i, w in enumerate(WORDS)}}
 
 OPTIONS = {
@@ -38,6 +38,14 @@ OPTIONS = {
 def tokenizer() -> Tokenizer:
     built = Tokenizer(models.WordLevel(VOCAB, unk_token="<unk>"))
     built.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+    return built
+
+
+def pair_tokenizer() -> Tokenizer:
+    """The shape of the jina tokenizers: <s> A </s></s> B </s>, with </s> matched in text."""
+    built = tokenizer()
+    built.add_special_tokens([AddedToken("<s>"), AddedToken("</s>")])
+    built.post_processor = processors.RobertaProcessing(("</s>", VOCAB["</s>"]), ("<s>", VOCAB["<s>"]))
     return built
 
 
@@ -67,9 +75,9 @@ class FakeSession:
         return [score.astype(np.float16).reshape(-1, 1)]
 
 
-def reranker(session: Any = None, **overrides: Any) -> Reranker:
-    return Reranker(session or FakeSession(), tokenizer(),
-                    RerankerConfig.from_options({**OPTIONS, **overrides}))
+def reranker(session: Any = None, built: Any = None, **overrides: Any) -> Reranker:
+    options = {key: value for key, value in {**OPTIONS, **overrides}.items() if value is not None}
+    return Reranker(session or FakeSession(), built or tokenizer(), RerankerConfig.from_options(options))
 
 
 class FakeRerankerEngine(Engine):

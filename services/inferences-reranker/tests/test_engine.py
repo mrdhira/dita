@@ -13,13 +13,14 @@ import numpy as np
 from textinfer import InputTooLong, InvalidRequest
 
 from reranker_worker.engines import ENGINE_NAMES, build_engine
-from reranker_worker.engines.cross_encoder import OnnxCrossEncoder, RerankerConfig, RerankRequest
+from reranker_worker.engines.cross_encoder import DEFAULT_BODY, OnnxCrossEncoder, RerankerConfig, RerankRequest
 from worker import UnknownEngine
 
-from .support import OPTIONS, VOCAB, FakeSession, Input, ids, reranker
+from .support import OPTIONS, VOCAB, FakeSession, Input, ids, pair_tokenizer, reranker
 
 PREFIX, SUFFIX = ids("judge:"), ids("answer:")
 HEAD = ids("<Instruct>: find it <Query>:")
+ROBERTA_PAIR = {"prefix": None, "suffix": None, "instruction": None, "body": "{query}</s></s>{text}"}
 
 
 def pair(query: str, text: str) -> list:
@@ -29,12 +30,23 @@ def pair(query: str, text: str) -> list:
 class ConfigTest(unittest.TestCase):
     def test_what_a_config_refuses(self) -> None:
         cases = [
-            ("a missing field", {"prefix": None}, "missing prefix"),
+            ("a missing field", {"onnx": None}, "missing onnx"),
             ("a string limit", {"max_input_tokens": "12"}, "max_input_tokens must be a positive"),
             ("a boolean budget", {"max_batch_tokens": True}, "max_batch_tokens must be a positive"),
             ("a pair that cannot fit a batch", {"max_input_tokens": 25}, "cannot exceed max_batch_tokens"),
             ("a limit past the model card", {"max_sequence_length": 8}, "max_sequence_length"),
             ("a prompt that is not text", {"instruction": 3}, "instruction must be a string"),
+            ("a body that is not text", {"body": 3}, "body must be a string"),
+            ("a body that needs an absent instruction", {"instruction": None},
+             "body uses {instruction} but the options set no instruction"),
+            ("a body without the query", {"body": "{instruction} {text}"}, "body must contain {query}"),
+            ("a body without the document", {"body": "{query}"}, "body must contain {text}"),
+            ("a body with the document twice", {"body": "{query} {text} {text}"}, "body must contain {text}"),
+            ("an unknown placeholder", {"body": "{title} {query} {text}"}, "body has the placeholder {title}"),
+            ("a positional placeholder", {"body": "{} {query} {text}"}, "body has the placeholder {}"),
+            ("a converted placeholder", {"body": "{query!r} {text}"}, "body has the placeholder {query!r}"),
+            ("a formatted placeholder", {"body": "{query:>9} {text}"}, "body has the placeholder {query:>9}"),
+            ("a broken template", {"body": "{query {text}"}, "body is not a valid template"),
         ]
         for name, change, message in cases:
             with self.subTest(name):
@@ -42,6 +54,15 @@ class ConfigTest(unittest.TestCase):
                 with self.assertRaises(ValueError) as caught:
                     RerankerConfig.from_options(options)
                 self.assertIn(message, str(caught.exception))
+
+    def test_what_a_config_defaults(self) -> None:
+        config = RerankerConfig.from_options(OPTIONS)
+        self.assertEqual(config.body, DEFAULT_BODY)
+        self.assertIn("{instruction}", config.body)
+        bare = RerankerConfig.from_options({k: v for k, v in OPTIONS.items()
+                                            if k not in ("prefix", "suffix", "instruction")}
+                                           | {"body": "{query} {text}"})
+        self.assertEqual((bare.prefix, bare.suffix, bare.instruction), ("", "", ""))
 
     def test_auto_truncate_is_off_unless_the_manifest_says_so(self) -> None:
         self.assertFalse(RerankerConfig.from_options(OPTIONS).auto_truncate)
@@ -52,6 +73,54 @@ class SequenceTest(unittest.TestCase):
     def test_each_pair_is_prefix_instruction_query_document_suffix(self) -> None:
         sequences = reranker().sequences(RerankRequest(query="mars", texts=["red planet", "noise"]))
         self.assertEqual(sequences, [pair("mars", "red planet"), pair("mars", "noise")])
+
+    def test_an_explicit_default_body_changes_nothing(self) -> None:
+        request = RerankRequest(query="mars", texts=["red planet", "noise"])
+        self.assertEqual(reranker(body=DEFAULT_BODY).sequences(request), reranker().sequences(request))
+
+    def test_a_custom_body_is_used_verbatim(self) -> None:
+        cases = [
+            ("without the prompt", {"prefix": None, "suffix": None, "instruction": None,
+                                    "body": "<Query>: {query} <Document>: {text}"},
+             ids("<Query>: mars <Document>: red planet")),
+            ("inside the prompt, with the instruction twice", {"body": "{instruction} {text} {query} {instruction}"},
+             PREFIX + ids("find it red planet mars find it") + SUFFIX),
+        ]
+        for name, change, expected in cases:
+            with self.subTest(name):
+                (sequence,) = reranker(**change).sequences(RerankRequest(query="mars", texts=["red planet"]))
+                self.assertEqual(sequence, expected)
+
+    def test_a_roberta_body_is_the_tokenizers_own_pair(self) -> None:
+        built = pair_tokenizer()
+        texts = ["red planet", "noise", ""]
+        sequences = reranker(built=built, **ROBERTA_PAIR).sequences(RerankRequest(query="mars", texts=texts))
+        self.assertEqual(sequences, [built.encode("mars", text).ids for text in texts])
+        self.assertEqual(sequences[0], [VOCAB[t] for t in ("<s>", "mars", "</s>", "</s>", "red", "planet", "</s>")])
+
+    def test_truncation_keeps_what_follows_the_document(self) -> None:
+        text = "red planet relevant noise mars " * 3
+        limit = OPTIONS["max_input_tokens"]
+        opening, closing = [VOCAB["<s>"]] + ids("mars") + [VOCAB["</s>"]] * 2, [VOCAB["</s>"]]
+        room = limit - len(opening) - len(closing)
+        after = ids("<Query>: mars")
+        self.assertGreater(len(ids(text)), limit, "the fixture must be too long to fit")
+        cases = [
+            ("a closing special token, cut right", {"built": pair_tokenizer(), **ROBERTA_PAIR}, "right",
+             opening + ids(text)[:room] + closing),
+            ("a closing special token, cut left", {"built": pair_tokenizer(), **ROBERTA_PAIR}, "left",
+             opening + ids(text)[-room:] + closing),
+            ("the query after the document", {"prefix": None, "suffix": None, "instruction": None,
+                                              "body": "{text} <Query>: {query}"}, "right",
+             ids(text)[:limit - len(after)] + after),
+        ]
+        for name, change, direction, expected in cases:
+            with self.subTest(name):
+                request = RerankRequest(query="mars", texts=[text], truncate=True,
+                                        truncation_direction=direction)
+                (sequence,) = reranker(**change).sequences(request)
+                self.assertEqual(sequence, expected)
+                self.assertEqual(len(sequence), limit)
 
     def test_truncation_cuts_only_the_document(self) -> None:
         text = "red planet relevant noise mars red"

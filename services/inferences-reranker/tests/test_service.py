@@ -22,7 +22,7 @@ from textinfer import InvalidRequest
 from reranker_worker import tei
 from reranker_worker.__main__ import WORKER
 from reranker_worker.engines import ENGINE_NAMES
-from reranker_worker.engines.cross_encoder import RerankerConfig
+from reranker_worker.engines.cross_encoder import DEFAULT_BODY, RerankerConfig
 from worker import Metrics, ModelManager, SocketServer, load_registry, metrics as metrics_mod
 
 from .support import REGISTRY_YAML, FakeRerankerEngine
@@ -205,15 +205,26 @@ class ServiceIdentityTest(unittest.TestCase):
         self.assertEqual(sorted(WORKER.routes), ["/health", "/info", "/rerank"])
         self.assertEqual(WORKER.registry_path, MANIFEST)
 
-    def test_the_one_model_is_the_multilingual_qwen3_reranker(self) -> None:
-        self.assertEqual(list(self.registry.models), ["qwen3-reranker-0.6b"])
-        spec = self.registry.get(self.registry.default_model)
-        self.assertEqual(spec.engine, "onnx_cross_encoder")
-        self.assertTrue({"en", "id", "ja"} <= set(spec.langs))
-        config = RerankerConfig.from_options(spec.options)
-        self.assertTrue(config.auto_truncate)
-        self.assertIn(config.onnx, [f.dest for f in spec.files])
-        self.assertIn(config.tokenizer, [f.dest for f in spec.files])
+    def test_the_default_is_the_english_turbo_model(self) -> None:
+        self.assertEqual(self.registry.default_model, "jina-reranker-v1-turbo-en")
+        self.assertEqual(self.registry.get(self.registry.default_model).langs, ["en"])
+
+    def test_every_model_is_one_the_engine_can_serve(self) -> None:
+        cases = [
+            ("jina-reranker-v1-turbo-en", {"en"}, "{query}</s></s>{text}"),
+            ("qwen3-reranker-0.6b", {"en", "id", "ja"}, DEFAULT_BODY),
+        ]
+        self.assertEqual(sorted(self.registry.models), [model_id for model_id, _, _ in cases])
+        for model_id, langs, body in cases:
+            with self.subTest(model_id):
+                spec = self.registry.get(model_id)
+                self.assertEqual(spec.engine, "onnx_cross_encoder")
+                self.assertTrue(langs <= set(spec.langs))
+                config = RerankerConfig.from_options(spec.options)
+                self.assertEqual(config.body, body)
+                self.assertTrue(config.auto_truncate)
+                self.assertIn(config.onnx, [f.dest for f in spec.files])
+                self.assertIn(config.tokenizer, [f.dest for f in spec.files])
 
     def test_the_tokenizer_comes_from_the_official_repository(self) -> None:
         (tokenizer,) = [f for f in self.registry.get("qwen3-reranker-0.6b").files if f.dest == "tokenizer.json"]

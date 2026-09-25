@@ -3,22 +3,57 @@
 The graph is Qwen3-Reranker converted to a one-logit sequence classifier: its logit is the
 original model's yes-logit minus its no-logit at the last token, so `sigmoid(logit)` is the
 official P(yes). The prompt around each pair is the model card's; the tokens must match the
-reference exactly, and a test holds them to it.
+reference exactly, and a test holds them to it. Another model sets its own `body`: the pair as
+one string, which must encode to the ids its reference feeds the graph.
 """
 
 from __future__ import annotations
 
 import os
+import string
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from textinfer import InputTooLong, InvalidRequest, feedable, feeds, open_session, pad, plan_batches
 from worker import Engine, Result
 
 THREADS_ENV = "RERANKER_THREADS"
-BODY = "<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {text}"
+DEFAULT_BODY = "<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {text}"
+PLACEHOLDERS = ("query", "text", "instruction")
+
+
+def body_fields(body: str) -> List[Tuple[str, Optional[str]]]:
+    """The (literal, placeholder) runs of a body, refused unless every placeholder is a bare
+    {query}, {text} or {instruction} and the first two appear exactly once."""
+    try:
+        parsed = list(string.Formatter().parse(body))
+    except ValueError as exc:
+        raise ValueError(f"body is not a valid template: {exc}") from None
+    for _, field, spec, conversion in parsed:
+        if field is not None and (field not in PLACEHOLDERS or spec or conversion):
+            shown = field + (f"!{conversion}" if conversion else "") + (f":{spec}" if spec else "")
+            raise ValueError(f"body has the placeholder {{{shown}}}; only {{query}}, {{text}} "
+                             "and {instruction} are allowed")
+    fields = [field for _, field, _, _ in parsed if field is not None]
+    for name in ("query", "text"):
+        if fields.count(name) != 1:
+            raise ValueError(f"body must contain {{{name}}} exactly once")
+    return [(literal, field) for literal, field, _, _ in parsed]
+
+
+def split_body(body: str) -> Tuple[str, str]:
+    """The templates before and after {text}, so the document's span in a pair is known."""
+    parts: Tuple[List[str], List[str]] = ([], [])
+    side = 0
+    for literal, field in body_fields(body):
+        parts[side].append(literal.replace("{", "{{").replace("}", "}}"))
+        if field == "text":
+            side = 1
+        elif field is not None:
+            parts[side].append(f"{{{field}}}")
+    return "".join(parts[0]), "".join(parts[1])
 
 
 @dataclass(frozen=True)
@@ -27,18 +62,18 @@ class RerankerConfig:
     tokenizer: str
     pad_token: str
     output: str
-    prefix: str
-    suffix: str
-    instruction: str
     max_input_tokens: int
     max_batch_tokens: int
+    prefix: str = ""
+    suffix: str = ""
+    instruction: str = ""
+    body: str = DEFAULT_BODY
     auto_truncate: bool = False
     max_sequence_length: Optional[int] = None
 
     @classmethod
     def from_options(cls, options: Mapping[str, Any]) -> "RerankerConfig":
-        required = ("onnx", "tokenizer", "pad_token", "output", "prefix", "suffix", "instruction",
-                    "max_input_tokens", "max_batch_tokens")
+        required = ("onnx", "tokenizer", "pad_token", "output", "max_input_tokens", "max_batch_tokens")
         missing = [name for name in required if name not in options]
         if missing:
             raise ValueError(f"reranker options are missing {', '.join(missing)}")
@@ -52,19 +87,23 @@ class RerankerConfig:
         card_limit = options.get("max_sequence_length")
         if card_limit is not None and options["max_input_tokens"] > card_limit:
             raise ValueError("max_input_tokens cannot exceed the model's max_sequence_length")
-        for name in ("prefix", "suffix", "instruction"):
-            if not isinstance(options[name], str):
+        for name in ("prefix", "suffix", "instruction", "body"):
+            if not isinstance(options.get(name, ""), str):
                 raise ValueError(f"{name} must be a string")
+        body = options.get("body", DEFAULT_BODY)
+        if any(field == "instruction" for _, field in body_fields(body)) and "instruction" not in options:
+            raise ValueError("body uses {instruction} but the options set no instruction")
         return cls(
             onnx=str(options["onnx"]),
             tokenizer=str(options["tokenizer"]),
             pad_token=str(options["pad_token"]),
             output=str(options["output"]),
-            prefix=options["prefix"],
-            suffix=options["suffix"],
-            instruction=options["instruction"],
             max_input_tokens=options["max_input_tokens"],
             max_batch_tokens=options["max_batch_tokens"],
+            prefix=options.get("prefix", ""),
+            suffix=options.get("suffix", ""),
+            instruction=options.get("instruction", ""),
+            body=body,
             auto_truncate=bool(options.get("auto_truncate", False)),
             max_sequence_length=card_limit,
         )
@@ -98,6 +137,7 @@ class Reranker:
         tokenizer.no_truncation()
         self._prefix = tokenizer.encode(config.prefix, add_special_tokens=False).ids
         self._suffix = tokenizer.encode(config.suffix, add_special_tokens=False).ids
+        self._before, self._after = split_body(config.body)
         if len(self._prefix) + len(self._suffix) >= config.max_input_tokens:
             raise ValueError("the prompt alone fills max_input_tokens")
 
@@ -110,14 +150,16 @@ class Reranker:
         budget = self._config.max_input_tokens - len(self._prefix) - len(self._suffix)
         sequences = []
         for index, text in enumerate(request.texts):
-            body = BODY.format(instruction=self._config.instruction, query=request.query, text=text)
+            fill = {"instruction": self._config.instruction, "query": request.query}
+            before = self._before.format(**fill)
+            body = before + text + self._after.format(**fill)
             encoding = self._tokenizer.encode(body)
             ids = encoding.ids
             if len(ids) > budget:
                 if not request.truncate:
                     raise InputTooLong(index, len(ids) + len(self._prefix) + len(self._suffix),
                                        self._config.max_input_tokens)
-                ids = self._cut_document(encoding, len(body) - len(text), budget,
+                ids = self._cut_document(encoding, len(before), len(before) + len(text), budget,
                                          request.truncation_direction)
             sequences.append(self._prefix + ids + self._suffix)
         return sequences
@@ -133,15 +175,20 @@ class Reranker:
         return logits
 
     @staticmethod
-    def _cut_document(encoding: Any, document_start: int, budget: int, direction: str) -> List[int]:
-        """Only the document is cut, so the instruction and the query always survive."""
-        head = next((i for i, (start, _) in enumerate(encoding.offsets) if start >= document_start),
-                    len(encoding.ids))
-        room = budget - head
+    def _cut_document(encoding: Any, start: int, end: int, budget: int, direction: str) -> List[int]:
+        """Only the document is cut, so the instruction, the query and any closing special
+        token (which the post-processor adds at offset 0) always survive."""
+        inside = [i for i, ((first, last), special) in
+                  enumerate(zip(encoding.offsets, encoding.special_tokens_mask))
+                  if not special and first >= start and last <= end]
+        head = inside[0] if inside else len(encoding.ids)
+        tail = inside[-1] + 1 if inside else len(encoding.ids)
+        room = budget - head - (len(encoding.ids) - tail)
         if room <= 0:
             raise InvalidRequest("the query alone fills max_input_tokens; shorten the query")
-        document = encoding.ids[head:]
-        return encoding.ids[:head] + (document[:room] if direction == "right" else document[-room:])
+        document = encoding.ids[head:tail]
+        kept = document[:room] if direction == "right" else document[-room:]
+        return encoding.ids[:head] + kept + encoding.ids[tail:]
 
 
 class OnnxCrossEncoder(Engine):

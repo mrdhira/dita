@@ -3,9 +3,95 @@
 # in docs/inferences/reranker/[1]technical-requirement.md#data-model.
 
 version: 1
-default_model: qwen3-reranker-0.6b
+default_model: jina-reranker-v1-turbo-en
 
 models:
+  # fp32 on purpose. The repository also ships model_fp16.onnx (half the bytes) and
+  # model_int8.onnx / model_quantized.onnx (a quarter). On this CPU (AVX2, no AVX-512, no VNNI)
+  # onnxruntime has no fp16 kernels, so fp16 is cast back to fp32 and buys only disk; int8 runs
+  # without VNNI's dot-product instruction and its scores are not the published model's. Either
+  # is one line to try, but only against a measured latency and ranking agreement.
+  - id: jina-reranker-v1-turbo-en
+    description: >-
+      jinaai/jina-reranker-v1-turbo-en: a 6-layer, 38M-parameter English cross-encoder in ONNX
+      (fp32), distilled from jina-reranker-v1-base-en. Reads a RoBERTa pair.
+    engine: onnx_cross_encoder
+    langs: [en]
+    source:
+      type: huggingface
+      repo: jinaai/jina-reranker-v1-turbo-en
+      revision: b8c14f4e723d9e0aab4732a7b7b93741eeeb77c2
+    files:
+      - path: onnx/model.onnx
+        sha256: c1296c66c119de645fa9cdee536d8637740efe85224cfa270281e50f213aa565
+        bytes: 151296975
+      - path: tokenizer.json
+        sha256: 0046da43cc8c424b317f56b092b0512aaaa65c4f925d2f16af9d9eeb4d0ef902
+        bytes: 2030772
+    options:
+      onnx: onnx/model.onnx
+      tokenizer: tokenizer.json
+      pad_token: "<pad>"
+      output: logits
+      # What tokenizer.encode(query, text) yields: RobertaProcessing wraps a pair as
+      # <s> A </s></s> B </s>, all type id 0. A test holds the two to the same ids.
+      body: "{query}</s></s>{text}"
+      max_sequence_length: 8192
+      max_input_tokens: 1024
+      max_batch_tokens: 1024
+      auto_truncate: true
+
+  # Registered for the day the bank holds Indonesian or Japanese; it is 100% English today,
+  # where the English turbo model is several times cheaper per pair.
+# ---------------------------------------------------------------------------
+# NOT ACTIVE. jina-reranker-v2-base-multilingual, kept here so switching is one
+# move rather than a re-derivation. It is the multilingual (en/id/ja) 12-layer
+# XLM-RoBERTa cross-encoder: 1.11 GB of weights against turbo-en's 147 MB, so it
+# costs roughly 1 GB more resident memory for languages the bank does not hold --
+# every memory in it is English today. Switch to it when memory is first retained
+# in Indonesian or Japanese, or if turbo-en is measured to rank worse on our own
+# data (it ranks faster; that is proven: 6-layer distilled vs 12-layer teacher).
+# To activate: uncomment this entry, fetch it (`make parity` and the fetch path
+# read ./models), set `default_model` above to it, and set PRELOAD_MODEL in
+# compose.yaml to match. Nothing about the stored memories changes: the reranker
+# only reorders candidates, so there is no re-embedding and no re-ingestion.
+#   9cfeff2df7d40d1b78e75e5e9cebec92a99813c9 = the pinned HF revision
+#   1114040223 bytes / sha256 0ef3f7978f7bc52360864d74edc1a0e03d159af770a7767c4d5943496e616012 (onnx/model.onnx)
+#    17082734 bytes / sha256 3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20 (tokenizer.json)
+# body: "{query}</s></s>{text}"   (holds to its tokenizer's own pair encoding: make parity)
+#   - id: jina-reranker-v2-base-multilingual
+#     description: >-
+#       jinaai/jina-reranker-v2-base-multilingual: a 12-layer, 278M-parameter multilingual
+#       cross-encoder (XLM-RoBERTa) in ONNX (fp32). Reads a RoBERTa pair.
+#     engine: onnx_cross_encoder
+#     langs: [en, id, ja]
+#     source:
+#       type: huggingface
+#       repo: jinaai/jina-reranker-v2-base-multilingual
+#       revision: 9cfeff2df7d40d1b78e75e5e9cebec92a99813c9
+#     files:
+#       - path: onnx/model.onnx
+#         sha256: 0ef3f7978f7bc52360864d74edc1a0e03d159af770a7767c4d5943496e616012
+#         bytes: 1114040223
+#       - path: tokenizer.json
+#         sha256: 3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20
+#         bytes: 17082734
+#     options:
+#       onnx: onnx/model.onnx
+#       tokenizer: tokenizer.json
+#       pad_token: "<pad>"
+#       output: logits
+#       body: "{query}</s></s>{text}"
+#       max_sequence_length: 1024
+#       max_input_tokens: 1024
+#       max_batch_tokens: 1024
+#       auto_truncate: true
+#
+#
+  # The model this service was built for, kept registered and pinned so a rollback is one line.
+  # Registration costs disk and a verified pin, NOT memory: only the preloaded model is resident.
+  # It is the most accurate of the three and by far the slowest (~0.65-0.68 s per pair, ~30 s for
+  # 32 candidates, measured). Roll back by pointing default_model and PRELOAD_MODEL back at it.
   - id: qwen3-reranker-0.6b
     description: >-
       Qwen/Qwen3-Reranker-0.6B as a one-logit sequence classifier in ONNX (fp16). Multilingual,

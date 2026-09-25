@@ -38,6 +38,26 @@ export function describeError(error: unknown): { title: string; detail: string }
       return { title: "The engine refused this request", detail: problem.error };
     case status === 409:
       return { title: "This prediction is already corrected", detail: problem.error };
+    case status === 401:
+      return {
+        title: "The orchestrator needs a token this page does not hold",
+        detail:
+          "Writes on this orchestrator are locked to a token, and the dashboard never holds one. Nothing was changed.",
+      };
+    // The orchestrator refuses a write from another site, and one not sent as JSON: from this
+    // page either means a stale tab or something in between rewriting the request.
+    case status === 403:
+      return {
+        title: "The orchestrator refused a request it judged to come from another site",
+        detail:
+          "It accepts changes only from the dashboard's own page. Reload the page and try again. Nothing was changed.",
+      };
+    case status === 415:
+      return {
+        title: "The orchestrator refused the request's format",
+        detail:
+          "Changes must be sent as JSON, and this one was not. Reload the page and try again. Nothing was changed.",
+      };
     case status === 404:
       return { title: "Not found", detail: problem.error };
     case status === 502:

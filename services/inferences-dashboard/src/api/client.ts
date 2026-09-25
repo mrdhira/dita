@@ -45,13 +45,36 @@ export interface Decision {
   input_text: string;
   model_id: string;
   model_revision: string;
-  answers: Answer[];
+  /** null when the store holds a reply that no longer parses. */
+  answers: Answer[] | null;
   correction: Correction | null;
 }
 
+export interface Fault {
+  path: string;
+  message: string;
+}
+
+/**
+ * The verdict fields are the server's: `usable` and `faults` are the runtime rules, which keep a
+ * template saved under older authoring rules running; `authoring_issues` are what the editor's
+ * rules would refuse today. Each is absent from an orchestrator that predates it.
+ */
 export interface Template extends Draft {
   version: number;
   created_at: string;
+  retired?: boolean;
+  retired_at?: string;
+  usable?: boolean;
+  faults?: Fault[];
+  authoring_issues?: Fault[];
+}
+
+export interface Retirement {
+  name: string;
+  version: number;
+  retired: true;
+  retired_at: string;
 }
 
 export interface ClassScore {
@@ -87,11 +110,29 @@ export interface WorkerReport {
 
 const BASE = "/api/inferences";
 
+/**
+ * Every route answers `{error, error_type}` except a recovered panic, which answers RFC 9457
+ * `problem+json`; both are read, so neither shows the reader raw JSON.
+ */
+export function toProblem(parsed: unknown, fallback: string): Problem {
+  if (parsed === null || typeof parsed !== "object") return { error: fallback };
+  if ("error" in parsed && typeof parsed.error === "string") return parsed as Problem;
+  const { detail, title } = parsed as { detail?: unknown; title?: unknown };
+  if (typeof detail === "string" && detail !== "") return { error: detail };
+  if (typeof title === "string" && title !== "") return { error: title };
+  return { error: fallback };
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const init: RequestInit = { method, headers };
-  if (body !== undefined) {
+  // Every mutating request declares a JSON content type, even with no body (retire): the
+  // orchestrator refuses one that does not, because that refusal is what keeps a cross-site
+  // form POST, which cannot set a JSON content type, away from the store.
+  if (body !== undefined || method !== "GET") {
     headers["Content-Type"] = "application/json";
+  }
+  if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
   const res = await fetch(BASE + path, init);
@@ -102,13 +143,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   } catch {
     parsed = null;
   }
-  if (!res.ok) {
-    const problem =
-      parsed !== null && typeof parsed === "object" && "error" in parsed
-        ? (parsed as Problem)
-        : { error: text || res.statusText };
-    throw new ApiError(res.status, problem);
-  }
+  if (!res.ok) throw new ApiError(res.status, toProblem(parsed, text || res.statusText));
   return parsed as T;
 }
 
@@ -118,6 +153,8 @@ export const api = {
   versions: (name: string) =>
     request<{ versions: Template[] }>("GET", `/schemas/${encodeURIComponent(name)}/versions`),
   saveTemplate: (draft: Draft) => request<Template>("POST", "/schemas", draft),
+  retire: (name: string, version: number) =>
+    request<Retirement>("POST", `/schemas/${encodeURIComponent(name)}/versions/${version}/retire`),
   decide: (text: string, schema: { name: string; version: number }) =>
     request<Decision>("POST", "/decisions", { text, schema }),
   decision: (id: string) => request<Decision>("GET", `/decisions/${encodeURIComponent(id)}`),

@@ -31,6 +31,9 @@ describe("describeError", () => {
       "This prediction is already corrected",
     ],
     ["a timeout", 504, { error: "slow" }, "did not answer in time"],
+    ["a write without the token", 401, { error: "unauthorized" }, "needs a token"],
+    ["a cross-site write", 403, { error: "forbidden" }, "from another site"],
+    ["a write not sent as JSON", 415, { error: "unsupported" }, "the request's format"],
   ])("%s", (_, status, problem, title) => {
     expect(describeError(new ApiError(status, problem)).title).toContain(title);
   });
@@ -60,5 +63,14 @@ describe("shouldRetry", () => {
     [503, 2, false],
   ])("status %i after %i failures: %s", (status, failures, retry) => {
     expect(shouldRetry(failures, new ApiError(status, { error: "x" }))).toBe(retry);
+  });
+});
+
+describe("a refused write reads as a sentence, never the raw error", () => {
+  it.each([401, 403, 415])("%i", (status) => {
+    const raw = '{"error":"x","error_type":"Forbidden"}';
+    const { title, detail } = describeError(new ApiError(status, { error: raw }));
+    expect(detail).toMatch(/Nothing was changed\.$/);
+    expect(title + detail).not.toContain(raw);
   });
 });

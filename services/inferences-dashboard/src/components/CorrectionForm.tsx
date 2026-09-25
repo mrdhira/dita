@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type Decision } from "../api/client";
+import { api, type Answer, type Decision } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
 
 /**
  * The human's answer: nothing is preselected, so every recorded answer was chosen, and
  * "use suggestion" is a click, never a default. Submitting writes the pair once.
  */
-export function CorrectionForm({ decision }: { decision: Decision }) {
+export function CorrectionForm({ decision }: { decision: Decision & { answers: Answer[] } }) {
   const client = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const save = useMutation({

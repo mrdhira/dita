@@ -103,4 +103,16 @@ describe("the correction on a decision page", () => {
     renderAt("/decisions/p1", "/decisions/:id", <DecisionPage />);
     expect((await screen.findByTestId("recorded-fraud")).textContent).toContain("yes");
   });
+
+  it("says a stored answer that no longer parses cannot be shown, and offers no form", async () => {
+    stubApi({
+      "GET /decisions/p1": () => ({ status: 200, body: { ...decision, answers: null } }),
+    });
+    renderAt("/decisions/p1", "/decisions/:id", <DecisionPage />);
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "The stored answer to this prediction can no longer be read",
+    );
+    expect(screen.getByText("three failed logins then a transfer")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Record answer" })).toBeNull();
+  });
 });

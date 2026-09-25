@@ -27,12 +27,23 @@ export function DecisionPage() {
       <blockquote className="whitespace-pre-wrap rounded-md bg-slate-100 p-3 font-mono text-sm">
         {d.input_text}
       </blockquote>
-      <div className="grid gap-4 md:grid-cols-2">
-        {d.answers.map((a) => (
-          <AnswerView key={a.question} answer={a} />
-        ))}
-      </div>
-      {d.correction ? <RecordedCorrection decision={d} /> : <CorrectionForm decision={d} />}
+      {d.answers === null ? (
+        <p role="alert" className="text-sm text-red-800">
+          The stored answer to this prediction can no longer be read, so it cannot be shown or
+          corrected here. The prediction itself is kept.
+        </p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {d.answers.map((a) => (
+            <AnswerView key={a.question} answer={a} />
+          ))}
+        </div>
+      )}
+      {d.correction ? (
+        <RecordedCorrection decision={d} />
+      ) : (
+        d.answers !== null && <CorrectionForm decision={{ ...d, answers: d.answers }} />
+      )}
     </article>
   );
 }

@@ -17,6 +17,8 @@ export const NOUL_OPTIONS = ["false", "true"] as const;
 
 const TEMPLATE_NAME = /^[a-z][a-z0-9-]{1,63}$/;
 const QUESTION_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+// A decimal as the worker's float() reads one; hex, inf, nan and digit separators are refused.
+const LEVEL = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
 
 /** Length in code points, as Go counts runes: `.length` would count UTF-16 units. */
 export const chars = (s: string): number => Array.from(s).length;
@@ -91,11 +93,38 @@ export const draftSchema = z
           `a noul question's options are exactly ${NOUL_OPTIONS.map((o) => `"${o}"`).join(" and ")}`,
         );
       }
+      if (q.criteria === undefined || q.criteria.trim() === "") {
+        issue(
+          ["questions", i, "criteria"],
+          "criteria are required: the model reads them as the question, not its name",
+        );
+      }
+      const rangeValid = q.range !== undefined && q.range.min < q.range.max;
       if (q.range) {
         if (q.type !== "score")
           issue(["questions", i, "range"], "only a score question has a range");
-        else if (!(q.range.min < q.range.max))
-          issue(["questions", i, "range"], "min must be below max");
+        else if (!rangeValid) issue(["questions", i, "range"], "min must be below max");
+      }
+      if (q.type === "score") {
+        // The worker reads a score's options as its levels, in order.
+        const levels = q.options.map((o) => (LEVEL.test(o.trim()) ? Number(o) : NaN));
+        const rising = levels.every((l, j) =>
+          j === 0 ? !Number.isNaN(l) : l > (levels[j - 1] ?? Infinity),
+        );
+        if (!rising) {
+          issue(
+            ["questions", i, "options"],
+            "a score question's options are numeric levels that must rise",
+          );
+        } else if (q.range && rangeValid) {
+          const { min, max } = q.range;
+          if (levels.some((l) => l < min || l > max)) {
+            issue(
+              ["questions", i, "range"],
+              `range ${min}..${max} contradicts its options: numeric levels must rise within the range`,
+            );
+          }
+        }
       }
     });
   });
@@ -117,6 +146,25 @@ export const evaluationRowSchema = z.strictObject({
   label: z.string().min(1),
   probabilities: z.record(z.string(), z.number().min(0).max(1)),
 });
+
+/**
+ * What the editor's rules find wrong with a stored template, path by path. Not whether it runs:
+ * the runtime keeps templates saved under older rules working, and that verdict is the server's.
+ */
+export function templateFaults(t: {
+  name: string;
+  description: string;
+  questions: Question[];
+}): { path: string; message: string }[] {
+  const parsed = draftSchema.safeParse({
+    name: t.name,
+    description: t.description,
+    questions: t.questions,
+  });
+  return parsed.success
+    ? []
+    : parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+}
 
 /** zod's issues as the orchestrator reports them: dotted paths. */
 export function issuePaths(error: z.ZodError): string[] {

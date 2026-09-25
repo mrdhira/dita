@@ -6,6 +6,7 @@ import { DecidePage } from "./pages/DecidePage";
 import { DecisionPage } from "./pages/DecisionPage";
 import { EvalPage } from "./pages/EvalPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { TemplatesPage } from "./pages/TemplatesPage";
 
 export function makeQueryClient() {
@@ -25,6 +26,7 @@ export const routes = [
       { path: "decisions/:id", element: <DecisionPage /> },
       { path: "templates", element: <TemplatesPage /> },
       { path: "eval", element: <EvalPage /> },
+      { path: "*", element: <NotFoundPage /> },
     ],
   },
 ];

@@ -43,13 +43,24 @@ const template = {
   name: "alert-triage",
   description: "Alert triage, for the e2e",
   questions: [
-    { name: "severity", type: "choice", options: ["low", "medium", "high", "critical"] },
-    { name: "fraud", type: "noul", options: ["false", "true"] },
+    {
+      name: "severity",
+      type: "choice",
+      options: ["low", "medium", "high", "critical"],
+      criteria: "How severe is this alert?",
+    },
+    {
+      name: "fraud",
+      type: "noul",
+      options: ["false", "true"],
+      criteria: "Is this alert a sign of fraud?",
+    },
     {
       name: "risk_score",
       type: "score",
       options: ["1", "2", "3", "4", "5"],
       range: { min: 1, max: 5 },
+      criteria: "How risky is this alert, from 1 (none) to 5 (severe)?",
     },
   ],
 };
@@ -106,11 +117,11 @@ test("paste, decide, correct, reload: the correction is still attached", async (
     expect(predicted.model_id).toBe(pinned.id);
     expect(predicted.model_revision).toBe(pinned.revision);
     await expect(page.getByText(pinned.revision)).toBeVisible();
-    for (const a of predicted.answers) {
+    for (const a of predicted.answers ?? []) {
       const sum = a.options.reduce((s, o) => s + o.probability, 0);
       expect(Math.abs(sum - 1), `${a.question} sums to ${sum}`).toBeLessThanOrEqual(1e-6);
     }
-    const fraudAnswer = predicted.answers.find((a) => a.question === "fraud");
+    const fraudAnswer = predicted.answers?.find((a) => a.question === "fraud");
     expect(fraudAnswer?.options.map((o) => o.option).sort()).toEqual(["false", "true"]);
     await expectNoStubLabels(page);
   } else {
@@ -219,7 +230,9 @@ test("a correction is refused on screen when the prediction is already corrected
     timeout: answered.timeout,
   });
   expect(made.status()).toBe(201);
-  const { id, answers } = (await made.json()) as Decision;
+  const { id, answers: stored } = (await made.json()) as Decision;
+  const answers = stored ?? [];
+  expect(answers.length, "the worker answered").toBeGreaterThan(0);
   await page.goto(`/decisions/${id}`);
   for (const a of answers) {
     await page
@@ -234,4 +247,12 @@ test("a correction is refused on screen when the prediction is already corrected
   expect(first.status()).toBe(201);
   await page.getByRole("button", { name: "Record answer" }).click();
   await expect(page.getByRole("alert")).toContainText("already corrected");
+});
+
+test("a path the dashboard does not have says so, and leads back to Decide", async ({ page }) => {
+  await page.goto("/history");
+  await expect(page.getByRole("heading", { name: "There is no page at /history" })).toBeVisible();
+  await page.getByRole("link", { name: "Back to Decide" }).click();
+  await expect(page).toHaveURL(/\/decide$/);
+  await expect(page.getByRole("button", { name: "Decide" })).toBeVisible();
 });

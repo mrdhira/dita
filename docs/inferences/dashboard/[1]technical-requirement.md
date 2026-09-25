@@ -74,8 +74,11 @@ The requirement's three stores, kept deliberately different.
 questions[]}`; a question is `{name, type: noul | choice | score, options[2..20], criteria, range?}`. The
 version is assigned by the store and is the next integer; there is no update path. A version is withdrawn from
 new decisions by a line in `retirements.jsonl` (`{name, version, retired_at}`, once per version), never by
-touching `templates.jsonl`; every listed template carries `retired`.
-
+touching `templates.jsonl`; every listed template carries `retired`. On Templates, loading a template lists its
+versions and each can be retired after a confirmation that says Decide will stop offering it; a retired version
+is shown as retired in the list and disabled on Decide. The dashboard defaults to the first version the server
+marks `usable`, says why a version cannot be used, and marks one that `usable` but has `authoring_issues` as
+needing an update rather than blocking it — it displays the server's verdict, it does not compute its own.
 **2. Prediction + correction** — two files, two writes, never merged:
 
 | field | where | notes |
@@ -129,8 +132,7 @@ confidence}]`, so when the real worker lands only the adapter changes.
 | --- | --- |
 | `GET /schemas` · `POST /schemas` | latest version of each template · save a new version |
 | `GET /schemas/{name}/versions[/{v}]` | every version · one version, each with `retired` |
-| `POST /schemas/{name}/versions/{v}/retire` | → `200 {name, version, retired: true, retired_at}`; retiring again returns the first |
-| `POST /decisions` | `{text, schema:{name, version}}` → ask the worker, then write the prediction |
+| `POST /schemas/{name}/versions/{v}/retire` | → `200 {name, version, retired: true, retired_at}`; retiring again returns the first || `POST /decisions` | `{text, schema:{name, version}}` → ask the worker, then write the prediction |
 | `GET /decisions?limit=N` · `GET /decisions/{id}` | recent, newest first · one, with its correction |
 | `POST /decisions/{id}/correction` | `{answers:{question: option}}` → 201 once; **409** the second time |
 | `POST /evaluations` · `GET /evaluations` | score a labelled set and store it · list runs |
@@ -207,10 +209,9 @@ without). Templates stored before the rule still run: the worker falls back to t
 options are plain decimals (`-1`, `0.5`, `3`; no exponent, hex or infinity, which Go, zod and Python read
 differently), strictly rising, and inside its `range` when it has one. The editor has **no input for it yet**: loading a template and saving
 the next version keeps its criteria, but a new template cannot be given any from the dashboard.
-
 ### Control flow
 
-Happy path: paste → pick a template version → **Decide** → the worker answers → the prediction is written →
+Happy path: paste → pick a template version (the first usable one is preselected) → **Decide** → the worker answers → the prediction is written →
 the page moves to `/decisions/{id}` → the answer renders as a suggestion → the human picks each answer
 (nothing is preselected; **use suggestion** is a click) → **Record answer** → the correction is written and
 shown in place of the form. The URL carries the prediction id, so a reload reads the pair back from the store.
@@ -224,6 +225,10 @@ Failure modes, each tested:
 - **A second correction** — 409, the first stands, on disk and on screen.
 - **A correction after the template changed** — checked against the version the prediction was made
   under, not the newest.
+- **A stored template the rules refuse** — marked on Decide with its reason, never the default, and refused
+  on the page before any request.
+- **A path the dashboard does not have** (`/history`; History is `/decisions`) — a catch-all inside the
+  layout says there is no page there and links back to Decide, instead of the router's error screen.
 
 ### The recommendation contract
 
@@ -281,8 +286,10 @@ Recharts in v1, and no DIP `infer` change. Decided here:
 The store is created by the orchestrator on first start in `DECISIONS_DIR` (`/data/decisions`, a named
 volume `dita-decisions` in `services/dita-orchestrator/compose.yaml`). **No seed rows**: the first write is a
 real prediction. The SPA ships as static files behind `services/inferences-dashboard/Caddyfile`, run by
-`compose.yaml` as `caddy:2.11.4` on `proxy`, published on **127.0.0.1:8443 only**. **No LAN hostname** until
-the orchestrator has auth.
+`compose.yaml` as `caddy:2.11.4` on `proxy`, published on **127.0.0.1:8443 only**. **What is deployed goes
+further:** `inferences.home.arpa` and `orchestrator.api.home.arpa` are both live on the LAN through the box's
+own Caddy, whose site block is copied from this `Caddyfile` by hand (and has drifted: it omits
+`Permissions-Policy`). That is against this design's non-goal of no LAN exposure before auth; see Security.
 
 ## Rollback
 
@@ -321,8 +328,17 @@ backend the dashboard does not have yet.
   module-preload polyfill); the e2e asserts zero console errors, so a CSP violation would fail it.
 - **ESLint enforces the rendering rules**: `dangerouslySetInnerHTML`, `innerHTML`/`outerHTML`, `eval`,
   `new Function` and `localStorage` are errors.
-- **Auth does not exist.** The session cookie, login route and store are new orchestrator work and need the
-  definition of "user". Until then the dashboard is loopback-only, and so is the gateway.
+- **Auth does not exist, and both origins are on the LAN** (`inferences.home.arpa`,
+  `orchestrator.api.home.arpa`). The session cookie, login route and store are new orchestrator work and need
+  the definition of "user". Keeping LAN users out belongs in Caddy (`basic_auth` or `forward_auth` on the
+  site block); a token header the proxy injects authenticates the proxy, not the person, and would ride on
+  cross-site requests too, so it is not used. Cross-site writes are refused by the orchestrator instead
+  (JSON-only mutating routes, `Sec-Fetch-Site: cross-site` refused); the dashboard already sends JSON, and
+  shows a 401, 403 or 415 on a write as a sentence saying nothing was changed.
+- **Two failure shapes are read.** Every route answers `{error, error_type}` and a recovered panic answers
+  RFC 9457 `problem+json`; `toProblem` takes the `detail` (or `title`) of the second, so neither reaches the
+  reader as raw JSON. A stored prediction whose reply no longer parses (`answers: null`) is shown as such,
+  with no correction form, instead of breaking the page.
 - `pnpm audit --prod`: no known vulnerabilities. The build writes a **CycloneDX 1.7 SBOM** of the production
   dependencies with pnpm's own `sbom` (not served; it sits beside `dist/`).
 - Nothing the model returns is stored as a fact about a customer: a prediction is a **suggestion event** —
@@ -333,7 +349,7 @@ backend the dashboard does not have yet.
 
 ## Testing
 
-- **Unit (Vitest + React Testing Library), 96 tests:** the 26 shared schema cases; the noul rule, including the `yes`/`no` it used to accept; criteria kept through the editor; the calibration panel; the probability renderer
+- **Unit (Vitest + React Testing Library), 150 tests:** the 26 shared schema cases; the noul rule, including the `yes`/`no` it used to accept; criteria required, with its input, help text and error in the editor; score options numeric, rising and within their range; the server's usable verdict followed on Decide (an unusable version never preselected, shown with the server's fault and refused before any request; a usable one with authoring issues selectable and marked, and its issues marked at the editor's fields), with the editor's rules as the fallback for an older orchestrator; both failure shapes read; 401, 403 and 415 as sentences; a stored answer that no longer parses; retired versions disabled on Decide, and retired on Templates only after a confirmation; the catch-all for an unknown path; the calibration panel; the probability renderer
   (top-2 + confidence, never a bare value); correction state transitions (nothing preselected, record, 409
   shown and not retried, a stored correction shown on load); the CSV parser; error mapping per status; no
   retry on 4xx; the eval panel beside its baseline; the worker strip surviving a worker that is not running
@@ -347,7 +363,8 @@ backend the dashboard does not have yet.
 - **One Playwright e2e** — paste → decide → correct → reload → the correction is still attached — against
   Caddy with the production Caddyfile, the orchestrator binary over a fresh store, and the stub. It also reads
   the pair back through the API (the correction beside an unchanged prediction), shows the row in History, and
-  shows a second correction refused with the first standing.
+  shows a second correction refused with the first standing. A fourth test opens `/history` through Caddy and
+  follows the catch-all back to Decide.
 - **The same e2e against the real worker**, when `E2E_SYSTEM_ONE_URL` names one. The worker publishes no host
   port, so the URL is its address on `proxy`:
 
@@ -381,6 +398,7 @@ red; a `-real` one is written by the real-worker run. Either eval screenshot use
 - [ ] **Q:** ratify or reject the DIP response-shape change. Not assumed here. — *owner:* Dhira
 - [ ] **Q:** what "user" means on a single-account box: the gate on auth, and on a hostname. — *owner:* Dhira
 - [ ] **Q:** retention and access for the correction store: personal data and the training set. — *owner:* Dhira
-- [ ] **Follow-up:** an input for `criteria` in the template editor, since it changes the answer. — *owner:* Dita
+- [x] **Follow-up:** an input for `criteria` in the template editor, since it changes the answer. Done, and
+  required. — *owner:* Dita
 - [ ] **When the worker lands:** replace the stub contract in `decisions/worker.go` with the real answer shape
   (the worker's PR). The e2e's real-worker path exists; run it with `E2E_SYSTEM_ONE_URL`.

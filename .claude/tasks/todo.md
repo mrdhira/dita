@@ -1,5 +1,4 @@
 # Addendum: audit findings (`/mnt/data/workspaces/hardening-lane-b-addendum.md`), in priority order
-
 Supersedes the Caddy `header_up` design and the "same wording" pre-check below.
 
 ## Decisions up front
@@ -227,3 +226,26 @@ run said do NOT push, which overrides the order's push-and-PR.
   Playwright's teardown left the Caddy container running; a global teardown removes it.
 - **Not verified**: the real `inferences-system-one`; auth (it does not exist); latency p50/p95 and a
   calibration drift line (need a metrics backend).
+
+# Task: hardening lane A — `services/inferences-dashboard`
+Order: `/mnt/data/workspaces/hardening-lane-a.md`. Branch `feat/hardening-dashboard` off `c8b6d04`.
+No commit, no push. Legend: `[ ]` todo · `[x]` done.
+
+Baseline before any change: `pnpm vitest run --maxWorkers=2` → 12 files, 96 tests, all green.
+
+## Decisions, up front
+- **`criteria` is enforced in the `superRefine`, not by `z.string()`**, so a missing one is reported
+  at `questions.N.criteria` beside every other fault (zod 4 would otherwise skip the rules).
+- ~~Usable on Decide = passes `draftSchema`.~~ Superseded by the addendum: usability is the server's
+  verdict (`usable`, `faults`, `authoring_issues`); `draftSchema` is the fallback for an older orchestrator.
+- **Score rule paths:** non-numeric or not rising → `questions.N.options`; outside a valid range →
+  `questions.N.range` (the runtime reports the contradiction on the range). Only checked on a valid
+  range. Lane B owns the shared cases; if its paths differ, this is the line to move.
+- **Retire** is behind `api.retire`; `retired` absent is read as `false` until lane B lands.
+
+## Addendum (`hardening-lane-a-addendum.md`)
+- [x] A1. `src/lib/usability.ts`: the server's `usable`/`faults`/`authoring_issues`, editor rules as fallback.
+- [x] A2. Decide: usable-but-outdated selectable and marked; Templates marks authoring issues on load.
+- [x] A3. 401 / 403 / 415 as sentences; `problem+json` and `{error}` both read (`toProblem`).
+- [x] A4. Caddyfile comment and the doc state the LAN deployment; `limit=50` already at the ceiling.
+- [x] A5. Audit finding 4, dashboard side: `answers: null` shown as unreadable, no correction form.

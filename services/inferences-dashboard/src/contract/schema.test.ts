@@ -101,7 +101,10 @@ describe("a score question's options are numeric levels that rise", () => {
   const rising = "a score question's options are numeric levels that must rise";
   it.each([
     ["integers, rising", ["1", "2", "3"], undefined, []],
-    ["decimals and negatives, rising", ["-1", "0.5", "2e1"], undefined, []],
+    ["decimals and negatives, rising", ["-1", "0.5", "20"], undefined, []],
+    // An exponent is not a level the orchestrator's float() reads, so neither side may accept one:
+    // the shared cases carry the same rule, and this file used to disagree with them.
+    ["an exponent", ["1", "2e1"], undefined, [["questions.0.options", rising]]],
     ["rising within its range", ["1", "3", "5"], { min: 1, max: 5 }, []],
     ["a word", ["low", "high"], undefined, [["questions.0.options", rising]]],
     ["hex, which float() refuses", ["0x1", "0x2"], undefined, [["questions.0.options", rising]]],

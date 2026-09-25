@@ -9,6 +9,9 @@ export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 20;
 export const MAX_OPTION_LEN = 100;
 export const MAX_DESCRIPTION = 500;
+// Mirrors decisions.MaxCriteria in services/dita-orchestrator/decisions/schema.go. The shared cases in
+// specs/decisions/schema-cases.json are read by both suites, so a cap on one side only makes the other fail.
+export const MAX_CRITERIA = 500;
 export const MAX_TEXT = 20000;
 export const QUESTION_TYPES = ["noul", "choice", "score"] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
@@ -18,7 +21,9 @@ export const NOUL_OPTIONS = ["false", "true"] as const;
 const TEMPLATE_NAME = /^[a-z][a-z0-9-]{1,63}$/;
 const QUESTION_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 // A decimal as the worker's float() reads one; hex, inf, nan and digit separators are refused.
-const LEVEL = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+// A level the orchestrator accepts: no exponent, no leading plus, and digits on both sides of the point.
+// Mirrors `decimal = ^-?[0-9]+(\.[0-9]+)?$` in services/dita-orchestrator/decisions/schema.go.
+const LEVEL = /^-?[0-9]+(\.[0-9]+)?$/;
 
 /** Length in code points, as Go counts runes: `.length` would count UTF-16 units. */
 export const chars = (s: string): number => Array.from(s).length;
@@ -98,6 +103,8 @@ export const draftSchema = z
           ["questions", i, "criteria"],
           "criteria are required: the model reads them as the question, not its name",
         );
+      } else if (chars(q.criteria) > MAX_CRITERIA) {
+        issue(["questions", i, "criteria"], `at most ${MAX_CRITERIA} characters`);
       }
       const rangeValid = q.range !== undefined && q.range.min < q.range.max;
       if (q.range) {
@@ -106,8 +113,9 @@ export const draftSchema = z
         else if (!rangeValid) issue(["questions", i, "range"], "min must be below max");
       }
       if (q.type === "score") {
-        // The worker reads a score's options as its levels, in order.
-        const levels = q.options.map((o) => (LEVEL.test(o.trim()) ? Number(o) : NaN));
+        // The worker reads a score's options as its levels, in order. Not trimmed: Go matches the raw
+        // option, so " 1" is a level on neither side or on both, never on one.
+        const levels = q.options.map((o) => (LEVEL.test(o) ? Number(o) : NaN));
         const rising = levels.every((l, j) =>
           j === 0 ? !Number.isNaN(l) : l > (levels[j - 1] ?? Infinity),
         );

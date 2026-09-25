@@ -53,7 +53,12 @@ describe("what every mutating request carries", () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(
         new Response(
-          JSON.stringify({ name: "alert-triage", version: 1, retired: true, retired_at: "2026-09-25T00:00:00Z" }),
+          JSON.stringify({
+            name: "alert-triage",
+            version: 1,
+            retired: true,
+            retired_at: "2026-09-25T00:00:00Z",
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       ),
@@ -70,7 +75,9 @@ describe("what every mutating request carries", () => {
   });
 
   it("a GET declares no content type", async () => {
-    const fetchMock = vi.fn(() => Promise.resolve(new Response('{"templates":[]}', { status: 200 })));
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response('{"templates":[]}', { status: 200 })),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await api.templates();

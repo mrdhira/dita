@@ -30,6 +30,10 @@ services:
     volumes:
       # The training store: prediction and correction pairs, append-only. A named volume,
       # so `compose down` and a redeploy keep it; only `down -v` would drop it, and must not.
+      # The image now runs as uid 65532 (see the Dockerfile), so this directory must be owned by
+      # it. A volume Docker creates from this image inherits that ownership; the deployed volume
+      # predates the change and needs a one-time `chown -R 65532:0` before the first rootless
+      # start, or the gateway crash-loops on permission denied.
       - dita-decisions:/data/decisions
     # Published on loopback only, which does not keep the LAN out: the host's Caddy proxies
     # orchestrator.api.home.arpa here by name on `proxy`, and every container on `proxy` reaches

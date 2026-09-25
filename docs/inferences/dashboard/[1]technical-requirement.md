@@ -308,15 +308,21 @@ backend the dashboard does not have yet.
 
 ## Security and privacy
 
-- **Nothing can be erased, by decision.** The store keeps each prediction's `input_text` forever, and there is
-  no delete: append-only is what makes the training pairs trustworthy. That is acceptable for homelab alerts. It
-  matters the day someone pastes an alert that contains a credential: the only remedy is to stop the
-  orchestrator and edit the volume by hand, which `Open` will then check line by line.
-- **The container runs as root, by decision.** `USER 65532` is cheap on a fresh volume, but the deployed
-  `dita-decisions` named volume already holds root-owned `0640` files, so the image change alone would crash-loop
-  the gateway on permission denied. Doing it properly needs a one-time `chown -R 65532:65532` of that volume at
-  the same deploy, and a rollback plan for it. That is Dhira's call; until then the process stays root inside a
-  `FROM scratch` image with no shell.
+- **Nothing can be erased, by decision — ratified 2026-09-25.** The store keeps each prediction's `input_text`
+  forever, and there is no delete: append-only is what makes the training pairs trustworthy. That is acceptable
+  for homelab alerts. It matters the day someone pastes an alert that contains a credential, so the remedy is
+  written down instead of being improvised: **stop the orchestrator, copy the volume aside, drop the offending
+  prediction's line and any correction that points at its id, then start it again** — `Open` re-reads the file
+  line by line and a correction whose prediction is gone is the one shape it rejects, which is why both lines go
+  together. No automatic redaction, by the same decision: silently editing the evidence would corrupt the
+  training set to no benefit, since the credential is already in whatever pasted it.
+- **The container runs as a non-root uid, decided and implemented 2026-09-25.** The process runs as `65532:0`
+  (distroless `nonroot`), and `DECISIONS_DIR` is owned by it. Two things made this more than a one-line change,
+  and both are handled: a scratch image has no shell, so the directory cannot be `chown`ed at runtime — it is
+  created in the builder and copied in with `COPY --chown`, which also means a volume Docker creates from this
+  image inherits the ownership; and the **deployed** `dita-decisions` volume still held root-owned `0640` files,
+  so the image change alone would have crash-looped the gateway. The cutover is therefore a chown of that volume
+  at the deploy, with the volume copied aside first as the rollback.
 
 - **No secrets in the SPA.** `scripts/check-dist.mjs` greps `dist/` for key shapes (private key blocks,
   AWS, GitHub, Hugging Face, `sk-` style, Slack, Google, JWT, assigned secrets) and fails the build; shown to
@@ -397,7 +403,9 @@ red; a `-real` one is written by the real-worker run. Either eval screenshot use
 
 - [ ] **Q:** ratify or reject the DIP response-shape change. Not assumed here. — *owner:* Dhira
 - [ ] **Q:** what "user" means on a single-account box: the gate on auth, and on a hostname. — *owner:* Dhira
-- [ ] **Q:** retention and access for the correction store: personal data and the training set. — *owner:* Dhira
+- [x] **Q:** retention and access for the correction store: personal data and the training set. — *owner:* Dhira
+  Decided 2026-09-25: kept forever and append-only, per the two security bullets above; access is the LAN, as
+  documented in the gateway doc; a credential is handled by the erase procedure there rather than by redaction.
 - [x] **Follow-up:** an input for `criteria` in the template editor, since it changes the answer. Done, and
   required. — *owner:* Dita
 - [ ] **When the worker lands:** replace the stub contract in `decisions/worker.go` with the real answer shape

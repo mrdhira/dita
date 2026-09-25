@@ -1,3 +1,79 @@
+# Addendum: audit findings (`/mnt/data/workspaces/hardening-lane-b-addendum.md`), in priority order
+
+Supersedes the Caddy `header_up` design and the "same wording" pre-check below.
+
+## Decisions up front
+- **One write guard on every POST** (store routes, retire, chat, embed, rerank, decide): refuse
+  `Sec-Fetch-Site: cross-site` (403), require `Content-Type: application/json` (415), then the token
+  when set (401). A client of the pass-through that sends no JSON content type is refused: stated in the doc.
+- **The pre-check reports structured faults**, `{path, message}` in the zod dotted style. The fixture
+  pins `error_type` and the first fault's path; the worker's `Refusal` carries the same `path`. No prose match.
+- **Predictions keep their parsed answers** (`answers` on the record, beside the raw reply). A record
+  without them is re-read under today's rules and the view says `answers_reparsed: true`.
+- **Container user stays root, written down**: the deployed named volume holds root-owned 0640 files,
+  so `USER 65532` alone would crash-loop the gateway. It needs a one-time chown, which is Dhira's call.
+- **Two error shapes become one**: `{error, error_type}`, since every route and every worker speaks it.
+
+## Steps
+- [ ] 0. Gateway doc: drop `header_up`; token = programmatic; people = Caddy `basic_auth`/`forward_auth`.
+- [ ] 1. Store: `MaxRecord` shared by reader and writer; `SetEscapeHTML(false)`; truncate on a failed
+      append, poison if that fails; bounded evaluation name and class keys; read-only test.
+- [ ] 2. Write guard on every POST + table test; `WriteUnavailable` without URL or transport error;
+      compose and doc comments state what is deployed.
+- [ ] 3. `GOMEMLIMIT=200MiB`; one-slot `/evaluations`; streaming `rows` decode stopping at MaxRows+1; limit 50.
+- [ ] 4. Replay refuses a prediction (and a correction) pointing at nothing; stored answers; view errors visible.
+- [ ] 5. `429 -> busy`.
+- [ ] 6. Listings carry `usable`, `faults`, `retired`, `authoring_issues`; Decide uses the same verdict.
+- [ ] 7. Text boundary in the shared fixture; worker-cases by path + error_type; startup deadline check.
+- [ ] 8. A test for each surviving mutation.
+- [ ] 9. Chat logs status and size; one error shape; retention and root-user decisions written down.
+- [ ] 10. All gates again, mutation pass again, tree clean but for the change.
+
+---
+
+# Task: hardening lane B — the contract (orchestrator + worker + shared fixtures)
+
+Order: `/mnt/data/workspaces/hardening-lane-b.md`. Branch `feat/hardening-contract`. No commit, no push.
+
+## Decisions up front
+- **The pre-check mirrors the worker, not `ValidateDraft`.** `CheckQuestions` in `decisions/worker.go`
+  applies the worker's `_check_question` rules with the worker's exact messages. `ValidateDraft`
+  (now requiring criteria, numeric scores) is an authoring rule: applying it at decide time would
+  refuse every deployed template without criteria.
+- **`worker-cases.json` pins exact refusal messages**, so "same wording" is a test, not a claim.
+- **Retired is `410 Gone`, `error_type: "Retired"`.** Checked before the pre-check.
+- **`FORMAT` stays `dita-decisions/1`**: `retirements.jsonl` is additive; a rollback ignores it.
+- **Score levels are plain decimals for authoring** (regex), so Go, zod and Python cannot read
+  `0x10`, `1e3` or `Infinity` differently; the pre-check keeps the worker's own `float()` reading.
+- **Token lives in `inferences.Config`** (`INFERENCES_API_TOKEN`), checked in the router around the
+  five mutating routes only; the proxied worker routes are unchanged.
+
+## Steps
+- [x] 1. Go: `CheckQuestions` + Decide pre-check (400, worker's body shape, `schema_invalid`).
+- [x] 2. Go: retirements (store, replay, route, `retired` on listings, Decide refusal).
+- [x] 3. Go: `ValidateDraft` criteria required + `MaxCriteria`; score options numeric ascending in range.
+- [x] 4. `schema-cases.json`: criteria on every valid case, the new cases.
+- [x] 5. `worker-cases.json` + Go adapter test + Python test.
+- [x] 6. Token guard + config + tests both modes; gateway doc (Caddy `header_up`).
+- [x] 7. Docs: worker README (criteria fallback, Known behaviour), dashboard doc (layout, routes),
+      gateway doc (token), system-one doc (act_probability is a constant).
+- [x] 8. Verify: go test/vet/gofmt, make doctor/py-verify/dip-verify, worker test/coverage/parity.
+- [x] 9. Mutation pass over the new guards.
+
+## Review
+- **Gates**: `go test -race ./...` ok; `go vet`, `gofmt -l` clean; orchestrator coverage 75.4% (floor 68);
+  `make doctor`, `make py-verify`, `make dip-verify` pass; worker `test` 64 ran OK (5 parity skips),
+  `coverage` 99% (floor 98), `parity` 5/5 OK, worst max|dp| 1.70e-06.
+- **Parity weights** read-only from `dita-system-one`'s export: this worktree has none, and a second
+  export is a 2 GB torch job on a shared box. The engine's provenance check guards the pairing.
+- **Mutation**: 23 mutants over the new guards (pre-check, retirement, token, criteria, score rule,
+  both sides' wording and reply shape), all caught by a named test. One first run was a compile
+  error, not a catch; re-run as a real mutant and caught.
+- **Not verified**: the deployed gateway (no call made); the README's disk-at-90% and 5-level-score
+  numbers are from the order, not re-measured here; lane A's zod against the new schema cases.
+
+---
+
 # Task: `services/inferences-embedding`
 
 Order: `~/.hermes/tmp/dita-order-embedding.md`. Legend: `[ ]` todo · `[x]` done.

@@ -86,7 +86,8 @@ Rules the adapter and the dashboard may rely on:
   absent.
 - `act_probability` is the model's own escalate head (index 0 of its two-way softmax), reported and never
   used to override an answer in v1. On `laya-multilingual` its logits sit near ±1500, so it is 1.0 for every
-  input measured.
+  input measured: a constant that looks like information and is not. Nothing may be built on it until a
+  checkpoint whose act head varies lands (worker README, "Known behaviour of this checkpoint").
 - An answer that does not cover every asked question is an error, not a partial reply. The orchestrator
   refuses to store a reply it cannot match (`ParseReply`).
 - `GET /info` reports `model_id`, `model_revision`, `engine` and the bounds below; `GET /health` is 503 until a

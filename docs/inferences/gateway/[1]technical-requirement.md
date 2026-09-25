@@ -159,9 +159,50 @@ at most two idle connections.
 | `INFERENCES_RERANKER_URL` | `http://inferences-reranker:8080` |
 | `INFERENCES_SYSTEM_ONE_URL` | `http://inferences-system-one:8080` |
 | `INFERENCES_TIMEOUT` | `120s` (a Go duration; `120` without a unit is refused) |
+| `INFERENCES_API_TOKEN` | unset: the write routes are open, as before (see [Writes: one guard on every POST](#writes-one-guard-on-every-post)) |
 
-A URL without an `http(s)` scheme and a host, or a timeout that does not parse or is not
-positive, stops `serveRest` with the variable's name rather than being guessed at.
+A URL without an `http(s)` scheme and a host, a timeout that does not parse or is not
+positive, or a token shorter than 32 characters or with surrounding whitespace, stops
+`serveRest` with the variable's name rather than being guessed at.
+
+At start `serveRest` reads `inferences-system-one`'s `/info` and refuses to serve when
+`INFERENCES_TIMEOUT` does not outlast its published `deadline_s` (100 s today): the worker would
+otherwise hold its one slot for a caller the gateway has already dropped. A worker that is not up yet,
+or publishes no deadline, is logged as unchecked, not fatal. Compose sets `GOMEMLIMIT=200MiB` under
+the 256 MB container limit, so the collector works against the real ceiling.
+
+When no worker answers, the gateway's body names the worker and the reason only; its address and the
+transport error go to the log, not the caller.
+
+### Writes: one guard on every POST
+
+Every `POST` the orchestrator serves — the decisions store's routes, the retire route, `/api/v1/chat`
+and the pass-through `/api/inferences/{embed,rerank,decide}` — goes through one guard, in this order:
+
+| check | refused with |
+| --- | --- |
+| `Sec-Fetch-Site: cross-site` | `403`, `error_type: "Forbidden"` |
+| `Content-Type` other than `application/json` (parameters such as `charset` allowed) | `415`, `error_type: "Validation"` |
+| `INFERENCES_API_TOKEN` set and `X-Inferences-Token` missing or wrong | `401`, `error_type: "Unauthorized"` |
+
+**The first two close cross-site request forgery.** A `text/plain` or form POST is a CORS "simple"
+request: a browser sends it cross-site without asking, so any page a LAN user opens could otherwise write
+the store or spend the chat key. `application/json` forces a preflight, and the orchestrator serves no
+CORS headers, so the preflight fails and the request is never sent. `Sec-Fetch-Site` refuses outright
+what a current browser marks as cross-site. The dashboard already sends `application/json`. A client of
+the pass-through that sends no content type is refused too; TEI clients send `application/json`.
+
+**The token is for programmatic clients**, and off unless configured. Unset, nothing changes. Set, a
+missing header and a wrong one are both `401`, with a message saying which. The comparison is
+constant-time over SHA-256 digests, so neither the value nor its length leaks through timing. Reads
+(`GET`) stay open. Generate one with `openssl rand -hex 32` and give it to the orchestrator from an env
+file that is not committed; `serveRest` logs when it is unset.
+
+**A header added by a proxy is not authentication.** Do not have Caddy inject the token: a header set
+by the proxy authenticates the proxy, and Caddy would attach it to every request that reaches the
+origin, a cross-site one included. The deployment would look closed and not be. Keeping people on the
+LAN out of the dashboard is Caddy's job, with `basic_auth` or `forward_auth` on the site block; that
+configuration is Dhira's and Dita's to choose.
 
 ## The network question
 
@@ -181,8 +222,15 @@ embedding and reranker services already assume for their consumers. The loopback
 was not needed.
 
 **One decision of this change's own:** `2104` is published on **loopback only**
-(`127.0.0.1:2104`), not on all interfaces as the deployment stack does. The gateway has no
-auth; a host process may reach it, the LAN may not, and Caddy reaches it by name on `proxy`.
+(`127.0.0.1:2104`), not on all interfaces as the deployment stack does.
+
+**What is deployed, and what loopback does not do.** Loopback publishing keeps the port off the
+LAN, not the gateway: the host's Caddy serves `orchestrator.api.home.arpa` as a bare
+`reverse_proxy` to every route, on `0.0.0.0:443`, and about twenty-four containers on `proxy`
+reach `dita-orchestrator-rest:2104` directly. So the gateway is reachable from the LAN. What guards
+it is in the app: every POST refuses cross-site and non-JSON requests, and needs
+`INFERENCES_API_TOKEN` when that is set ([Writes](#writes-one-guard-on-every-post)). Reads are open
+to anyone who can reach it. A header Caddy injects is not authentication.
 
 The stacks are alternatives: both use the container name `dita-orchestrator-rest`, so
 running both fails loudly rather than splitting the port.
@@ -216,8 +264,9 @@ than hanging), a 30 s default, and leaving the server write deadline at w-tools'
 
 ## Security and privacy
 
-- **No auth.** Anyone who can reach `2104` can embed, rerank and read `/workers`. Loopback
-  binding limits that to this host and to containers on `proxy`. `deployment/docker-compose.yml`
+- **No auth by default.** Anyone who can reach `2104` can embed, rerank and read `/workers`, and
+  write the decisions store unless `INFERENCES_API_TOKEN` is set ([Writes](#writes-one-guard-on-every-post)).
+  Loopback binding limits that to this host and to containers on `proxy`. `deployment/docker-compose.yml`
   still publishes `2104` on all interfaces; a deployment from it would expose the gateway —
   and the existing `/api/v1/chat` — to the LAN.
 - **`DEEPSEEK_API_KEY`** is still required for `serveRest` to start, although only

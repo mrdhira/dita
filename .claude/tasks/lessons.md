@@ -19,3 +19,25 @@
   the test's own tsconfig needed it and `tsc -b` then failed.
 - **Rule:** after any `--fix`, run `tsc -b` before believing the tree is green; prefer a typed query
   (`getByRole<HTMLTextAreaElement>`) over a cast.
+
+## Refuse-rather-than-repair is a per-file decision, not a store-wide one
+- **Pattern:** I made replay refuse any unreadable prediction or correction, as briefed. One damaged
+  byte then crash-looped the gateway (`restart: unless-stopped`), taking embed, rerank and decide down.
+- **Rule:** before making a read path fatal, ask what the process does next. Fatal is right for the
+  small files that define the rules (templates); high-volume records are quarantined to a sidecar,
+  counted on `/stats`, and skipped. Weigh availability against correctness per file, and write the
+  reason in the doc comment.
+
+## A mutation run must restore the tree even when it is killed
+- **Pattern:** I wrapped a mutation script in `timeout`; it was killed mid-mutant, the `finally` never
+  ran, and a mutant stayed in `handler.go` while the user was verifying the tree.
+- **Rule:** never put `timeout` around a script that edits files. Back up each file before mutating,
+  and after any interrupted run, grep for the mutant text before reporting the tree as clean. A mutant
+  that makes a test block, not fail, needs a per-test `-timeout`, not a kill from outside.
+
+## A mutant that removes a network seam reaches the network
+- **Pattern:** mutating chat to ignore its `baseURL` seam sent the test's happy path to the real
+  `api.deepseek.com` (with a fake key). The committed suite was offline; the mutation run was not.
+- **Rule:** before mutating a seam that points at an outside service, make that service
+  unreachable for the run (an unroutable proxy in the environment, e.g. `HTTPS_PROXY=http://127.0.0.1:1`),
+  or skip that mutant and say so.

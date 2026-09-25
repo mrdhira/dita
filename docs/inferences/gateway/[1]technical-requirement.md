@@ -282,7 +282,20 @@ than hanging), a 30 s default, and leaving the server write deadline at w-tools'
   the gateway cannot run without an LLM key it never uses.
 - [ ] **Q:** OCR through the gateway: a DIP client over the shared socket (`packages/golibs/dip`)
   and an OCR row in `/workers`.
+- [ ] **Follow-up:** the box's Caddy block for `orchestrator.api.home.arpa` still proxies every path, including
+  `/api/v1/chat`. Narrowing it to the inferences routes is a deployment change, not a code one, and until it is
+  made the LAN can reach a route that spends the LLM key. The same block sets no `Permissions-Policy` header.
+- [ ] **Follow-up:** `INFERENCES_API_TOKEN` is unset in the deployment, so the write routes are open to anyone who
+  can reach the gateway and the worker routes answer without a token. The code path exists and is tested (`401`
+  when set); the deployment does not set it.
+- [ ] **Follow-up:** chat and the router's own `404`/`405` answer plain text while every handler answers the
+  standard error shape. Nothing parses them yet; a client that does will notice.
+- [ ] **Follow-up:** four mutations are known to survive the suite — removing the `fsync`, a failed write inside
+  `Correct` being ignored, `Evaluate`'s own row cap, and the dashboard's `MAX_TEXT` — and chat no longer logging
+  the reply body has no test that would notice its return.
 - [ ] **Follow-up:** the workers' eight-slot HTTP cap is held by idle keep-alive connections.
   Hindsight's pooled client filled all eight on the embedding worker while this was being
   verified (`refusing a scrape: 8 already open`), and `/health` was refused with it. The gateway
   reports that as `busy`; the fix belongs in `packages/pylibs/worker`.
+- [ ] **Q:** should the repo have CI? The dashboard's shared schema cases sat failing on `main` with nothing to
+  catch them, which is how the two implementations drifted apart. — *owner:* Dhira

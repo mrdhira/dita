@@ -314,8 +314,11 @@ backend the dashboard does not have yet.
   written down instead of being improvised: **stop the orchestrator, copy the volume aside, drop the offending
   prediction's line and any correction that points at its id, then start it again** — `Open` re-reads the file
   line by line and a correction whose prediction is gone is the one shape it rejects, which is why both lines go
-  together. No automatic redaction, by the same decision: silently editing the evidence would corrupt the
-  training set to no benefit, since the credential is already in whatever pasted it.
+  together. The remedy has to name every artifact it touches: **`Open` also writes unreadable lines aside into a
+  `<file>.rejected` sidecar** (`decisions/quarantine.go`), so a line that was set aside rather than parsed has
+  its bytes in two places, and the erase has to cover both. No automatic redaction, by the same decision: silently
+  editing the evidence would corrupt the training set to no benefit, since the credential is already in whatever
+  pasted it.
 - **The container runs as a non-root uid, decided and implemented 2026-09-25.** The process runs as `65532:0`
   (distroless `nonroot`), and `DECISIONS_DIR` is owned by it. Two things made this more than a one-line change,
   and both are handled: a scratch image has no shell, so the directory cannot be `chown`ed at runtime — it is

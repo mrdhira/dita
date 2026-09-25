@@ -23,7 +23,9 @@ import (
 // status, headers and body.
 type upstream struct {
 	mu       sync.Mutex
+	method   string
 	path     string
+	query    string
 	body     []byte
 	length   int64
 	status   int
@@ -35,7 +37,7 @@ type upstream struct {
 func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	u.mu.Lock()
-	u.path, u.body, u.length = r.URL.Path, body, r.ContentLength
+	u.method, u.path, u.query, u.body, u.length = r.Method, r.URL.Path, r.URL.RawQuery, body, r.ContentLength
 	u.mu.Unlock()
 	if u.block != nil {
 		<-u.block
@@ -490,8 +492,8 @@ func TestMetricsPassesTheWorkersPageThroughVerbatim(t *testing.T) {
 			if got := rec.Header().Get("Content-Type"); got != MetricsContentType {
 				t.Fatalf("content type %q, want %q", got, MetricsContentType)
 			}
-			if up.path != "/metrics" {
-				t.Fatalf("the worker was asked for %q; only /metrics is reachable", up.path)
+			if up.method != http.MethodGet || up.path != "/metrics" || up.query != "" {
+				t.Fatalf("the worker was asked %s %q ?%q; only GET /metrics is reachable", up.method, up.path, up.query)
 			}
 		})
 	}
@@ -526,5 +528,80 @@ func TestMetricsFromAWorkerThatIsDown(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 503 ||
 		got.Reason != "not_running" || got.ErrorType != "Unhealthy" || got.Worker != Reranker {
 		t.Fatalf("got %d %q (%v), want 503 not_running", rec.Code, rec.Body, err)
+	}
+}
+
+func TestMetricsKeepsAWorkersFailureAFailure(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		contentType string
+	}{
+		{"404 with an HTML page", 404, "text/html; charset=utf-8"},
+		{"500 as plain text", 500, "text/plain; charset=utf-8"},
+		{"503 as JSON", 503, "application/json"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			up := &upstream{status: c.status, response: []byte("not a metrics page"), headers: map[string]string{"Content-Type": c.contentType}}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, up)})
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+			if rec.Code != c.status {
+				t.Fatalf("status %d, want the worker's %d", rec.Code, c.status)
+			}
+			if got := rec.Header().Get("Content-Type"); got != c.contentType {
+				t.Fatalf("content type %q, want the worker's %q, never %q", got, c.contentType, MetricsContentType)
+			}
+		})
+	}
+}
+
+func TestMetricsRefusesAPageOverTheBound(t *testing.T) {
+	cases := []struct {
+		name string
+		size int
+		want int
+	}{
+		{"at the bound", maxMetricsBody, 200},
+		{"one byte over", maxMetricsBody + 1, 502},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			page := bytes.Repeat([]byte("x"), c.size)
+			up := &upstream{status: 200, response: page}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, up)})
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+			if rec.Code != c.want {
+				t.Fatalf("status %d for a %d-byte page, want %d", rec.Code, c.size, c.want)
+			}
+			if c.want == 200 {
+				if rec.Body.Len() != c.size {
+					t.Fatalf("served %d of %d bytes", rec.Body.Len(), c.size)
+				}
+				return
+			}
+			var got failure
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Reason != "too_large" ||
+				got.Worker != Reranker || !strings.Contains(got.Error, "exceeds") {
+				t.Fatalf("got %q (%v), want a too_large refusal naming the worker", rec.Body, err)
+			}
+		})
+	}
+}
+
+func TestMetricsStopsReadingAnEndlessPageAtTheBound(t *testing.T) {
+	endless := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := bytes.Repeat([]byte("x"), 32<<10)
+		for {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	})
+	gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, endless)})
+	rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+	var got failure
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 502 || got.Reason != "too_large" {
+		t.Fatalf("got %d %q (%v), want 502 too_large: reading must stop at the bound, not run to the probe timeout", rec.Code, rec.Body, err)
 	}
 }

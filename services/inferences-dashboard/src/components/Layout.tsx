@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import { NavLink, Outlet } from "react-router";
 import { api } from "../api/client";
 import { describeState, type Tone } from "../lib/fleet";
+import { useStaleness } from "../lib/stale";
+import { usePollInterval } from "../lib/visibility";
 
 const sections = [
   { to: "/", label: "Fleet" },
@@ -47,12 +49,15 @@ const strip: Record<Tone, string> = {
 
 /** A worker that is not running is a state to show, not a failure that breaks the page. */
 function WorkerStrip() {
+  const interval = usePollInterval(30_000);
   const workers = useQuery({
     queryKey: ["workers"],
     queryFn: api.workers,
-    refetchInterval: 30_000,
+    refetchInterval: interval,
   });
-  if (workers.isError) return <p className="text-xs text-slate-500">worker status unavailable</p>;
+  const stale = useStaleness(workers, interval);
+  if (workers.isError || stale)
+    return <p className="text-xs text-slate-500">worker status unavailable</p>;
   return (
     <ul aria-label="workers" className="flex flex-wrap gap-2 text-xs">
       {workers.data?.workers.map((w) => {

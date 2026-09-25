@@ -31,7 +31,7 @@ export function OverviewTab({
   service: DeployedService;
   report: WorkerReport | undefined;
 }) {
-  const { query, polling } = useWorkerMetrics(service.id);
+  const { query, polling, stale } = useWorkerMetrics(service.id);
   const resident = residentOf(report);
   const m = query.data;
   const or = (v: number | null, f: (n: number) => string) => (v === null ? "—" : f(v));
@@ -52,7 +52,7 @@ export function OverviewTab({
       <section aria-label="since the last restart" className="space-y-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-sm font-semibold">From /metrics, every 30 s</h3>
-          <AsOf at={query.dataUpdatedAt} polling={polling} failed={query.isError} />
+          <AsOf at={query.dataUpdatedAt} polling={polling} stale={stale} />
         </div>
         {query.error && <ErrorBanner error={query.error} />}
         {m && (

@@ -14,6 +14,7 @@ import {
   type Service,
 } from "../lib/fleet";
 import { formatDuration, residentFor } from "../lib/metrics";
+import { useStaleness } from "../lib/stale";
 import { usePollInterval } from "../lib/visibility";
 import { useWorkerMetrics } from "./service/useWorkerMetrics";
 
@@ -44,8 +45,8 @@ function ResidentModel({
 }
 
 function ResidentFor({ service }: { service: string }) {
-  const { query } = useWorkerMetrics(service);
-  const seconds = query.data && !query.isError ? residentFor(query.data) : null;
+  const { query, stale } = useWorkerMetrics(service);
+  const seconds = query.data && stale === null ? residentFor(query.data) : null;
   return <>{seconds === null ? "—" : formatDuration(seconds)}</>;
 }
 
@@ -115,14 +116,15 @@ export function FleetPage() {
   const byName = new Map(workers.data?.workers.map((w) => [w.name, w]));
   const known = new Set(FLEET.map((s) => s.container));
   const extra = (workers.data?.workers ?? []).filter((w) => !known.has(w.name));
-  const staleSince = workers.isError && workers.data ? workers.dataUpdatedAt : null;
+  const stale = useStaleness(workers, interval);
+  const staleSince = stale ? workers.dataUpdatedAt : null;
   const unreported = FLEET.filter((s) => !isDeployed(s)).every((s) => !byName.has(s.container));
 
   return (
     <section aria-label="fleet" className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold">Fleet</h2>
-        <AsOf at={workers.dataUpdatedAt} polling={interval !== false} failed={workers.isError} />
+        <AsOf at={workers.dataUpdatedAt} polling={interval !== false} stale={stale} />
       </div>
       {workers.error && !workers.data && <ErrorBanner error={workers.error} />}
       <table className="w-full text-sm max-sm:block">

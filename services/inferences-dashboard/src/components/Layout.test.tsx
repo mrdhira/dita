@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "../App";
 import { stubApi } from "../test/render";
 import { Layout } from "./Layout";
@@ -54,6 +54,27 @@ describe("the worker strip", () => {
     page();
     expect(await screen.findByText("worker status unavailable")).toBeTruthy();
     expect(screen.getByText("the page itself")).toBeTruthy();
+  });
+  it("stops showing the last answer once a refresh has hung past its budget", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let n = 0;
+      vi.stubGlobal("fetch", () =>
+        ++n === 1
+          ? Promise.resolve(new Response(JSON.stringify(workers), { status: 200 }))
+          : new Promise<Response>(() => undefined),
+      );
+      page();
+      await screen.findAllByRole("listitem");
+      await act(() => vi.advanceTimersByTimeAsync(69_000));
+      expect(n).toBe(2);
+      expect(screen.getAllByRole("listitem")).toHaveLength(3);
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+      expect(screen.getByText("worker status unavailable")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

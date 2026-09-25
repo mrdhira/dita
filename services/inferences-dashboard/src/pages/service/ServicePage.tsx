@@ -5,6 +5,7 @@ import { AsOf } from "../../components/AsOf";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { StaleNote, StateBadge } from "../../components/StateBadge";
 import { describeState, isDeployed, notDeployed, serviceById } from "../../lib/fleet";
+import { useStaleness } from "../../lib/stale";
 import { usePollInterval } from "../../lib/visibility";
 import { LogsTab } from "./LogsTab";
 import { MetricsTab } from "./MetricsTab";
@@ -36,6 +37,7 @@ export function ServicePage() {
     enabled: service !== undefined && isDeployed(service),
     refetchInterval: interval,
   });
+  const staleness = useStaleness(workers, interval);
 
   if (!service) {
     return (
@@ -61,7 +63,7 @@ export function ServicePage() {
   const report = workers.data?.workers.find((w) => w.name === service.container);
   const current = TABS.find((t) => t.path === tab);
   const view = report ? describeState(report) : null;
-  const stale = workers.isError && report !== undefined;
+  const stale = staleness !== null && report !== undefined;
   return (
     <section aria-label={service.container} className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -77,7 +79,7 @@ export function ServicePage() {
           )}
           {stale && <StaleNote at={workers.dataUpdatedAt} />}
         </div>
-        <AsOf at={workers.dataUpdatedAt} polling={interval !== false} failed={workers.isError} />
+        <AsOf at={workers.dataUpdatedAt} polling={interval !== false} stale={staleness} />
       </div>
       {workers.error && !workers.data && <ErrorBanner error={workers.error} />}
       {workers.isSuccess && !report && (

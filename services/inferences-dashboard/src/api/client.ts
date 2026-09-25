@@ -9,10 +9,12 @@ export interface Problem {
   issues?: { path: string; message: string }[];
 }
 
+/** `route` is set on the console's polled reads of the gateway (`/workers`, `/metrics/…`). */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly problem: Problem,
+    readonly route?: string,
   ) {
     super(problem.error);
     this.name = "ApiError";
@@ -123,9 +125,14 @@ export function toProblem(parsed: unknown, fallback: string): Problem {
   return { error: fallback };
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  const init: RequestInit = { method, headers };
+  const init: RequestInit = { method, headers, signal: signal ?? null };
   // Every mutating request declares a JSON content type, even with no body (retire): the
   // orchestrator refuses one that does not, because that refusal is what keeps a cross-site
   // form POST, which cannot set a JSON content type, away from the store.
@@ -145,6 +152,36 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) throw new ApiError(res.status, toProblem(parsed, text || res.statusText));
   return parsed as T;
+}
+
+export const READ_DEADLINE_MS = 10_000;
+
+/**
+ * A polled read ends at its deadline. Without one, a request that never answers keeps the query
+ * fetching forever, so it never fails and the last answer keeps looking live.
+ */
+async function polled<T>(
+  path: string,
+  signal: AbortSignal | undefined,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(new DOMException("no answer", "TimeoutError"));
+  }, READ_DEADLINE_MS);
+  try {
+    return await run(signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal);
+  } catch (e) {
+    if (e instanceof ApiError) throw new ApiError(e.status, e.problem, path);
+    if (!deadline.signal.aborted) throw e;
+    throw new ApiError(
+      0,
+      { error: `no answer within ${READ_DEADLINE_MS / 1000} s`, error_type: "NoAnswer" },
+      path,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** A Try-it answer as it arrived: the status and body are shown, never interpreted away. */
@@ -180,10 +217,8 @@ async function tryRequest(path: string, body: string): Promise<TryResult> {
   };
 }
 
-async function metricsText(service: string): Promise<string> {
-  const res = await fetch(`${BASE}/metrics/${encodeURIComponent(service)}`, {
-    headers: { Accept: "text/plain" },
-  });
+async function metricsText(route: string, signal: AbortSignal): Promise<string> {
+  const res = await fetch(BASE + route, { headers: { Accept: "text/plain" }, signal });
   const text = await res.text();
   const type = res.headers.get("content-type") ?? "";
   if (res.ok && type.startsWith("text/plain")) return text;
@@ -202,10 +237,18 @@ async function metricsText(service: string): Promise<string> {
   throw new ApiError(res.status, toProblem(parsed, text || res.statusText));
 }
 
+const workersRoute = "/workers";
+
 export const api = {
-  metrics: metricsText,
+  metrics: (service: string, signal?: AbortSignal) => {
+    const route = `/metrics/${encodeURIComponent(service)}`;
+    return polled(route, signal, (s) => metricsText(route, s));
+  },
   tryIt: tryRequest,
-  workers: () => request<{ workers: WorkerReport[] }>("GET", "/workers"),
+  workers: ({ signal }: { signal?: AbortSignal } = {}) =>
+    polled(workersRoute, signal, (s) =>
+      request<{ workers: WorkerReport[] }>("GET", workersRoute, undefined, s),
+    ),
   templates: () => request<{ templates: Template[] }>("GET", "/schemas"),
   versions: (name: string) =>
     request<{ versions: Template[] }>("GET", `/schemas/${encodeURIComponent(name)}/versions`),

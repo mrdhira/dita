@@ -35,7 +35,7 @@ function HistogramTable({ h }: { h: Histogram }) {
 }
 
 export function MetricsTab({ service }: { service: string }) {
-  const { query, polling } = useWorkerMetrics(service);
+  const { query, polling, stale } = useWorkerMetrics(service);
   const m = query.data;
   return (
     <div className="space-y-4">
@@ -44,7 +44,7 @@ export function MetricsTab({ service }: { service: string }) {
           Read from the worker&apos;s /metrics every 30 s. Nothing stores these: counters are since
           the last restart, and there is no history to chart.
         </p>
-        <AsOf at={query.dataUpdatedAt} polling={polling} failed={query.isError} />
+        <AsOf at={query.dataUpdatedAt} polling={polling} stale={stale} />
       </div>
       {query.error && <ErrorBanner error={query.error} />}
       {m && (

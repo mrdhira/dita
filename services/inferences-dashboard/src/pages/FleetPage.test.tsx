@@ -253,12 +253,14 @@ describe("FleetPage", () => {
                     report("inferences-embedding", "ready", {
                       info: { model_id: "qwen3-embedding-0.6b" },
                     }),
+                    report("inferences-extra", "ready"),
                   ],
                 },
               },
       });
       renderAt("/", "/", <FleetPage />);
       const r = await row("inferences-embedding");
+      const extra = screen.getByRole("row", { name: "inferences-extra" });
       const badge = () =>
         within(r).getByText("ready", { exact: false, selector: "span[data-tone]" });
       expect(badge().dataset.stale).toBeUndefined();
@@ -276,6 +278,101 @@ describe("FleetPage", () => {
       expect(badge().className).not.toMatch(/emerald/);
       expect(within(r).getByText(/^stale: not refreshed since \d\d:\d\d:\d\d$/)).toBeTruthy();
       expect(within(r).getByText("qwen3-embedding-0.6b")).toBeTruthy();
+      const extraBadge = within(extra).getByText("ready", {
+        exact: false,
+        selector: "span[data-tone]",
+      });
+      expect(extraBadge.dataset.stale).toBe("true");
+      expect(within(extra).getByText(/^stale: not refreshed since/)).toBeTruthy();
+    });
+
+    const answered = () =>
+      new Response(
+        JSON.stringify({
+          workers: [
+            report("inferences-embedding", "ready", { info: { model_id: "qwen3-embedding-0.6b" } }),
+          ],
+        }),
+        { status: 200 },
+      );
+
+    it("marks the rows stale when a refresh hangs, even one that ignores its deadline", async () => {
+      let n = 0;
+      vi.stubGlobal("fetch", (input: string) => {
+        if (input.endsWith("/workers") && ++n === 1) return Promise.resolve(answered());
+        return new Promise<Response>(() => undefined);
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-embedding");
+      const badge = () =>
+        within(r).getByText("ready", { exact: false, selector: "span[data-tone]" });
+
+      await act(() => vi.advanceTimersByTimeAsync(19_000));
+      expect(n).toBe(2);
+      expect(badge().dataset.stale).toBeUndefined();
+      expect(screen.getByRole("status").textContent).toBe("");
+
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      expect(badge().dataset.stale).toBe("true");
+      expect(badge().className).not.toMatch(/emerald/);
+      expect(within(r).getByText(/^stale: not refreshed since/)).toBeTruthy();
+      expect(screen.getByRole("status").textContent).toBe(
+        " · the latest refresh has not answered; this is the last good answer",
+      );
+    });
+
+    it("ends a hung refresh at its deadline, reports it failed, and polls again", async () => {
+      const signals: AbortSignal[] = [];
+      vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
+        if (!input.endsWith("/workers")) return new Promise<Response>(() => undefined);
+        if (signals.push(init?.signal as AbortSignal) === 1) return Promise.resolve(answered());
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(init.signal?.reason as Error);
+          });
+        });
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-embedding");
+
+      await act(() => vi.advanceTimersByTimeAsync(14_500));
+      expect(signals).toHaveLength(2);
+      expect(signals[1]?.aborted).toBe(false);
+
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      expect(signals[1]?.aborted).toBe(true);
+      expect(screen.getByRole("status").textContent).toBe(
+        " · the latest refresh failed; this is the last good answer",
+      );
+      expect(
+        within(r).getByText("ready", { exact: false, selector: "span[data-tone]" }).dataset.stale,
+      ).toBe("true");
+
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      expect(signals.length).toBeGreaterThan(2);
+    });
+
+    it("drops resident-for to — when the worker's /metrics stops answering", async () => {
+      let failing = false;
+      stubApi({
+        "GET /workers": () => ({
+          status: 200,
+          body: { workers: [report("inferences-reranker", "ready")] },
+        }),
+        "GET /metrics/reranker": () =>
+          failing
+            ? { status: 502, body: { error: "gone" } }
+            : { status: 200, body: rerankerMetrics },
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-reranker");
+      await vi.waitFor(() => {
+        expect(cellText(r, 3)).toBe("1 h 12 min");
+      });
+
+      failing = true;
+      await act(() => vi.advanceTimersByTimeAsync(35_000));
+      expect(cellText(r, 3)).toBe("—");
     });
 
     it("polls every 5 s while visible, stops while hidden, and says it is paused", async () => {

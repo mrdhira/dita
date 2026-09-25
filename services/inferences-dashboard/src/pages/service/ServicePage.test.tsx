@@ -389,6 +389,46 @@ describe("ServicePage", () => {
       expect(screen.getAllByText(/paused while this tab is hidden/)).toHaveLength(2);
     });
 
+    it("marks the header stale when a /workers refresh hangs", async () => {
+      let n = 0;
+      vi.stubGlobal("fetch", (input: string) => {
+        if (input.endsWith("/workers") && ++n === 1) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ workers: [reranker] }), { status: 200 }),
+          );
+        }
+        return new Promise<Response>(() => undefined);
+      });
+      renderAt("/services/reranker/models", "/services/:id/:tab?", <ServicePage />);
+      const badge = await screen.findByText("ready", { exact: false, selector: "span[data-tone]" });
+      await act(() => vi.advanceTimersByTimeAsync(29_000));
+      expect(badge.dataset.stale).toBeUndefined();
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      expect(badge.dataset.stale).toBe("true");
+      expect(screen.getByText(/^stale: not refreshed since \d\d:\d\d:\d\d$/)).toBeTruthy();
+      expect(
+        screen.getByText(/the latest refresh has not answered; this is the last good answer/),
+      ).toBeTruthy();
+    });
+
+    it("overview: the /metrics as of admits a failed refresh", async () => {
+      let failing = false;
+      open("/services/reranker", {
+        "GET /metrics/reranker": () =>
+          failing
+            ? { status: 502, body: { error: "gone" } }
+            : { status: 200, body: rerankerMetrics },
+      });
+      const figures = await screen.findByRole("region", { name: "since the last restart" });
+      await within(figures).findByText("318 MiB");
+      expect(within(figures).getByRole("status").textContent).toBe("");
+      failing = true;
+      await act(() => vi.advanceTimersByTimeAsync(35_000));
+      expect(within(figures).getByRole("status").textContent).toBe(
+        " · the latest refresh failed; this is the last good answer",
+      );
+    });
+
     it("marks the header stale when the latest /workers refresh failed", async () => {
       let failing = false;
       open("/services/reranker/metrics", {

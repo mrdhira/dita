@@ -517,6 +517,24 @@ func TestOneUnreadableRecordNeverFailsTheHistory(t *testing.T) {
 	}
 }
 
+// A directory where the file should be makes every append fail, for root as well.
+func TestACorrectionThatCannotBeWrittenIsNotReportedAsMade(t *testing.T) {
+	dir := t.TempDir()
+	e := newEnv(t, dir, worker(t, 200, stubReply))
+	e.call("POST", "/schemas", draft)
+	_, made, _ := e.call("POST", "/decisions", decide)
+	id := made["id"].(string)
+	if err := os.Mkdir(filepath.Join(dir, "corrections.jsonl"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, body := e.call("POST", "/decisions/"+id+"/correction", `{"answers":{"severity":"high","fraud":"true"}}`); code != 500 || !strings.Contains(body, `"error_type":"Backend"`) {
+		t.Fatalf("a correction that was never written: %d %s", code, body)
+	}
+	if _, got, _ := e.call("GET", "/decisions/"+id, ""); got["correction"] != nil {
+		t.Fatalf("a correction that was never written is attached: %v", got["correction"])
+	}
+}
+
 func TestAQuarantinedLineIsCountedOnStats(t *testing.T) {
 	dir := t.TempDir()
 	e := newEnv(t, dir, worker(t, 200, stubReply))

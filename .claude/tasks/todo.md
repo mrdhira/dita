@@ -1,3 +1,31 @@
+# Console release 1 (`.claude/tasks/console-r1-spec.md`), read-only
+
+## Decisions up front
+- **Route shape follows the design, not the spec**: `GET /api/inferences/metrics/{service}` (design §9).
+  The spec's `/api/inferences/{service}/metrics` also overlaps `GET /api/inferences/decisions/{id}`
+  on `/api/inferences/decisions/metrics`, which Go's ServeMux refuses at registration.
+- Service ids are `embedding`, `reranker`, `system-one`; the intended-fleet list (ocr/stt/tts) is static.
+- Existing Decide/History/Templates/Eval stay, as a secondary "decision workbench" row; the five
+  top-level entries are the design's.
+- Polling: fleet 5 s, detail 10 s, metrics 30 s, all gated on `document.visibilityState`.
+
+## Steps
+- [x] 1. Gateway: metrics pass-through + tests (verbatim, unknown 404 shape, POST 405 Allow: GET).
+- [x] 2. SPA: status vocabulary, visibility hook, metrics parser (fixed names, no percentile).
+- [x] 3. SPA: Fleet (`/`), service detail tabs, thin Models/Activity/Jobs/Settings, lazy routes.
+- [x] 4. Tests for each behaviour; one guard proven by mutation.
+- [x] 5. Gates: lint, vitest, build (chunk sizes), go test; screenshots against real data.
+- [ ] 6. Push, open the PR against main, leave it open.
+
+## Review
+- Gates clean: lint, 210 vitest, build (landing chunk 113.38 kB gzip, from 155.04 on main), go test.
+- Mutations: 5 mutants, all caught. The hidden-tab guard is held twice (ours and React Query's
+  focus manager); the fetch-count assertion bites only when both are removed, shown on purpose.
+- Found in the screenshots, not the tests: `dita_worker_ops_total` counts DIP socket ops (mostly
+  `readyz` probes), not HTTP requests. Relabelled; the Overview counts inferences from the
+  `infer_duration` histogram's `_count`.
+- Not done: dark mode (§13), Lighthouse (§14), per-container Dozzle deep link.
+
 # Addendum: audit findings (`/mnt/data/workspaces/hardening-lane-b-addendum.md`), in priority order
 Supersedes the Caddy `header_up` design and the "same wording" pre-check below.
 

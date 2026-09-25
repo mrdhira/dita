@@ -48,3 +48,10 @@
   rules validate only its own state; any fallback for an older server says so in a comment.
 - **Check:** before reusing a validation schema for a different question ("may this run?" versus
   "may this be saved?"), find who answers that question on the server.
+
+## Name a metric by what its HELP line says it counts
+- **Pattern:** I labelled `dita_worker_ops_total` "requests handled"; on the live worker it was
+  3,727 `readyz` probes and no inference at all, because HTTP inferences never touch the DIP op
+  counter. The unit tests passed: the fixture was real, the label was the invention.
+- **Rule:** before titling a series, read its `# HELP` and one live scrape, and check which path
+  increments it. Where two paths exist (DIP and HTTP), say which one the number covers.

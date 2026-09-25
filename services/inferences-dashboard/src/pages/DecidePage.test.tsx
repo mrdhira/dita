@@ -44,6 +44,18 @@ describe("DecidePage", () => {
       { error: "x", reason: "not_running", worker: "inferences-system-one" },
       "The decision worker is not running",
     ],
+    [
+      "Caddy's empty 502, the orchestrator down: not the worker",
+      502,
+      "",
+      "The orchestrator, or something in front of it, answered 502",
+    ],
+    [
+      "a proxy's bare 503: not the worker's model",
+      503,
+      "Service Unavailable",
+      "The orchestrator, or something in front of it, answered 503",
+    ],
     ["an engine refusal", 422, { error: "refused" }, "The engine refused this request"],
     [
       "a malformed schema",

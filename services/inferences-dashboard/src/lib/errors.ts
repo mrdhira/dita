@@ -3,8 +3,11 @@ import { ApiError, type Problem } from "../api/client";
 const isGatewayRead = (route: string | undefined) =>
   route === "/workers" || route?.startsWith("/metrics/") === true;
 
-/** On these reads the gateway names the worker it blames, so a 5xx naming none is not a worker's. */
-function describeRead(route: string, status: number, problem: Problem) {
+/** A body the orchestrator, the gateway or a worker wrote names its error; a bare one came from in front. */
+const fromServer = (p: Problem) =>
+  p.error_type !== undefined || p.worker !== undefined || p.reason !== undefined;
+
+function describeRead(route: string, problem: Problem) {
   if (problem.error_type === "NoAnswer") {
     return {
       title: "The gateway did not answer in time",
@@ -14,18 +17,12 @@ function describeRead(route: string, status: number, problem: Problem) {
   if (problem.reason === "not_running" && problem.worker !== undefined) {
     return { title: `${problem.worker} is not running`, detail: `${problem.error}.` };
   }
-  if (status >= 500 && problem.worker === undefined) {
-    return {
-      title: `The gateway, or something in front of it, answered ${status}`,
-      detail: `${route}: ${problem.error || "no body"}. This says nothing about any worker or its model.`,
-    };
-  }
   return null;
 }
 
 /**
- * What a person should read for a failed request. A reasonless 503 means "no model" only on a
- * pass-through route (Try it, decide), never on the console's own reads of the gateway.
+ * What a person should read for a failed request. A 5xx is read from its body, never its route: only
+ * a body that says so can mean a worker has no model or answered badly.
  */
 export function describeError(error: unknown): { title: string; detail: string } {
   if (!(error instanceof ApiError)) {
@@ -37,8 +34,14 @@ export function describeError(error: unknown): { title: string; detail: string }
   }
   const read = isGatewayRead(route);
   if (read && route) {
-    const described = describeRead(route, status, problem);
+    const described = describeRead(route, problem);
     if (described) return described;
+  }
+  if (status >= 500 && !fromServer(problem)) {
+    return {
+      title: `${read ? "The gateway" : "The orchestrator"}, or something in front of it, answered ${status}`,
+      detail: `${route ? `${route}: ` : ""}${problem.error || "no body"}. This says nothing about any worker or its model.`,
+    };
   }
   switch (true) {
     case status === 503 && problem.reason === "not_running":
@@ -51,7 +54,7 @@ export function describeError(error: unknown): { title: string; detail: string }
         title: "The worker is busy",
         detail: "It is at its connection limit. Nothing was recorded.",
       };
-    case status === 503 && (problem.reason !== undefined || read):
+    case status === 503 && (problem.reason !== undefined || problem.worker !== undefined):
       return {
         title: "The worker could not be reached",
         detail: `${problem.error}. Nothing was recorded.`,

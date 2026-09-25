@@ -36,7 +36,17 @@ describe("describeError", () => {
       { error: "the first stands" },
       "This prediction is already corrected",
     ],
-    ["a timeout", 504, { error: "slow" }, "did not answer in time"],
+    [
+      "the gateway: the worker timed out",
+      504,
+      {
+        error: "slow",
+        error_type: "Unhealthy",
+        worker: "inferences-system-one",
+        reason: "timeout",
+      },
+      "did not answer in time",
+    ],
     ["a write without the token", 401, { error: "unauthorized" }, "needs a token"],
     ["a cross-site write", 403, { error: "forbidden" }, "from another site"],
     ["a write not sent as JSON", 415, { error: "unsupported" }, "the request's format"],
@@ -44,7 +54,7 @@ describe("describeError", () => {
     expect(describeError(new ApiError(status, problem)).title).toContain(title);
   });
 
-  describe("on the console's reads of the gateway, a 5xx that names no worker is not the worker's", () => {
+  describe("a 5xx is read from its body: one no server wrote is not a worker's", () => {
     it.each([
       [
         "/workers",
@@ -93,19 +103,42 @@ describe("describeError", () => {
         { error: "x", worker: "inferences-reranker" },
         "The worker could not be reached",
       ],
-      [undefined, 503, { error: "no model is loaded" }, "The worker has no model loaded"],
+      [
+        undefined,
+        503,
+        { error: "no model is loaded", error_type: "Unhealthy" },
+        "The worker has no model loaded",
+      ],
       [
         undefined,
         502,
-        { error: "reading the worker's answer: EOF" },
+        { error: "" },
+        "The orchestrator, or something in front of it, answered 502",
+      ],
+      [
+        undefined,
+        503,
+        { error: "Service Unavailable" },
+        "The orchestrator, or something in front of it, answered 503",
+      ],
+      [
+        undefined,
+        504,
+        { error: "" },
+        "The orchestrator, or something in front of it, answered 504",
+      ],
+      [
+        undefined,
+        502,
+        { error: "reading the worker's answer: EOF", error_type: "Backend" },
         "The worker answered in a shape it was not asked for",
       ],
     ])("%s %i %j", (route, status, problem, title) => {
       const { title: got, detail } = describeError(new ApiError(status, problem, route));
       expect(got).toBe(title);
-      if (route && got.startsWith("The gateway")) {
-        expect(detail).toContain(route);
-        expect(`${got} ${detail}`).not.toMatch(/no model loaded/);
+      if (got.includes("or something in front of it")) {
+        if (route) expect(detail).toContain(route);
+        expect(`${got} ${detail}`).not.toMatch(/no model loaded|The worker/);
       }
     });
 
@@ -116,9 +149,10 @@ describe("describeError", () => {
   });
 
   it("says nothing was recorded when the worker could not answer", () => {
-    expect(describeError(new ApiError(503, { error: "no model is loaded" })).detail).toContain(
-      "Nothing was recorded",
-    );
+    expect(
+      describeError(new ApiError(503, { error: "no model is loaded", error_type: "Unhealthy" }))
+        .detail,
+    ).toContain("Nothing was recorded");
   });
 
   it("names the issue paths of a malformed schema", () => {

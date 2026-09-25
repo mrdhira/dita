@@ -48,3 +48,61 @@
   rules validate only its own state; any fallback for an older server says so in a comment.
 - **Check:** before reusing a validation schema for a different question ("may this run?" versus
   "may this be saved?"), find who answers that question on the server.
+
+## Name a metric by what its HELP line says it counts
+- **Pattern:** I labelled `dita_worker_ops_total` "requests handled"; on the live worker it was
+  3,727 `readyz` probes and no inference at all, because HTTP inferences never touch the DIP op
+  counter. The unit tests passed: the fixture was real, the label was the invention.
+- **Rule:** before titling a series, read its `# HELP` and one live scrape, and check which path
+  increments it. Where two paths exist (DIP and HTTP), say which one the number covers.
+
+## Absence of data is not a state
+- **Pattern:** the console printed "No model is resident … requests fail" whenever `/info` was
+  null, which is also what a pending query, a failed gateway, a `busy` worker and a failed second
+  probe look like. A `ready · serving` row said "none resident" beside itself.
+- **Rule:** before rendering a claim from a null, list every path that produces that null. Claim
+  the state only from the field that reports it (`state === "no_model"`); every other null is
+  "unknown", said as such.
+- **Check:** grep the UI for negative claims ("no", "none", "not") and find each one's source field.
+
+## A hang is not a failure
+- **Pattern:** the stale treatment keyed on `isError`. A request that never answers never fails, so
+  a paused orchestrator or a dropped network left every row green for as long as it hung.
+- **Rule:** anything that claims freshness needs two triggers, failure and age, and every polled
+  read needs a deadline that turns a hang into a failure. Test both with a fetch that never
+  settles: one that ignores its signal (age must fire) and one that honours it (the deadline must).
+
+## `tsc -p .` on a solution tsconfig checks nothing
+- **Pattern:** `npx tsc --noEmit -p .` printed nothing on a type error, because the root
+  `tsconfig.json` only lists references. Lint and vitest do not type-check either, so a
+  `signal: undefined` under `exactOptionalPropertyTypes` reached three commits before `pnpm build`
+  caught it.
+- **Rule:** the dashboard's type gate is `pnpm build` (`tsc -b`). Run it before every commit, and
+  build each commit of a series on its own before pushing.
+
+## Fix the class, not the routes the reviewer named
+- **Pattern:** round two fixed "a bare 5xx blames the worker" on `/workers` and `/metrics` only,
+  the two routes the report named, and then wrote a docstring claiming the rest was already right.
+  Every other page kept the bug, and the docstring was false.
+- **Rule:** when a finding names instances, grep for the mechanism (`describeError`, every caller of
+  `ErrorBanner`) and fix every instance. Decide from the evidence the input carries (the body), not
+  from where it came from (the route). Never document a scope you have not tested.
+
+## A gate loop that prints only the summary loses the flake
+- **Pattern:** a per-commit build/lint/test loop printed `Tests 1 failed | 291 passed` and nothing
+  else. The failure did not reproduce in 18 runs, and which test it was is now unknowable.
+- **Rule:** every gate loop prints the `FAIL` lines and the first assertion, not just the count.
+
+## zsh does not split a scalar: never let a destructive step follow an unchecked backup
+- **Pattern:** `FILES="a b c"; cp $FILES…` in zsh passes one argument, so every backup failed, and
+  the `git checkout` and `rm` that followed still ran and removed uncommitted work. The same
+  non-splitting had already broken a mutation loop in an earlier session.
+- **Rule:** use an array (`files=(a b c)`, `"${files[@]}"`), and chain the destructive step on the
+  backup's success (`cp … && git checkout …`). Commit or WIP-commit before any experiment that
+  rewrites tracked files.
+
+## A table row can pass through the detail line
+- **Pattern:** the Decide row asserted that the banner *text* contained "inferences-system-one
+  answered 500". With the fix removed, the title fell back to "The request failed (500)", but the
+  detail still contained the phrase, so the row passed. Mutation caught it.
+- **Rule:** when the claim is the title, assert the title element, not the banner's whole text.

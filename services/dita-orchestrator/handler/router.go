@@ -48,6 +48,7 @@ func NewRouter(logger *slog.Logger, addr string, chatHandler *chat.ChatHandler, 
 	inferencesAPI.Post("/decide", write(gateway.Decide))
 	inferencesAPI.Get("/workers", gateway.Workers)
 	inferencesAPI.Get("/health", gateway.Health)
+	inferencesAPI.Get("/metrics/{service}", gateway.Metrics)
 
 	inferencesAPI.Get("/schemas", decisionsHandler.Templates)
 	inferencesAPI.Post("/schemas", write(decisionsHandler.SaveTemplate))

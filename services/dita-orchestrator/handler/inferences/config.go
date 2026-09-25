@@ -19,8 +19,8 @@ const (
 // off answers that are merely slow.
 const DefaultTimeout = 120 * time.Second
 
-// DefaultProbeTimeout bounds each /info and /health call behind GET /workers. Both answer
-// without touching the model lock, so a worker that needs longer is not answering at all.
+// DefaultProbeTimeout bounds each /info and /health call behind GET /workers; a worker that needs
+// longer is not answering. The dashboard's read deadline derives from it, and a test pins it.
 const DefaultProbeTimeout = 5 * time.Second
 
 // MinAPIToken refuses a token short enough to guess; `openssl rand -hex 32` gives 64.

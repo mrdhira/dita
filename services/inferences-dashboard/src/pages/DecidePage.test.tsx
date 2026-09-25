@@ -44,6 +44,28 @@ describe("DecidePage", () => {
       { error: "x", reason: "not_running", worker: "inferences-system-one" },
       "The decision worker is not running",
     ],
+    [
+      "the worker's own HTML 500, which the orchestrator relays as JSON naming the worker",
+      500,
+      {
+        error: "inferences-system-one answered 500 with a body of type text/html, not a JSON error",
+        error_type: "Backend",
+        worker: "inferences-system-one",
+      },
+      "inferences-system-one answered 500",
+    ],
+    [
+      "Caddy's empty 502, the orchestrator down: not the worker",
+      502,
+      "",
+      "The orchestrator, or something in front of it, answered 502",
+    ],
+    [
+      "a proxy's bare 503: not the worker's model",
+      503,
+      "Service Unavailable",
+      "The orchestrator, or something in front of it, answered 503",
+    ],
     ["an engine refusal", 422, { error: "refused" }, "The engine refused this request"],
     [
       "a malformed schema",
@@ -60,7 +82,14 @@ describe("DecidePage", () => {
     await screen.findByRole("option", { name: /alert-triage v2/ });
     await userEvent.type(screen.getByRole("textbox"), "an alert");
     await userEvent.click(screen.getByRole("button", { name: "Decide" }));
-    expect((await screen.findByRole("alert")).textContent).toContain(message);
+    const alert = await screen.findByRole("alert");
+    const banner = alert.textContent;
+    expect(banner).toContain(message);
+    expect(banner).not.toContain("<");
+    if (message === "inferences-system-one answered 500") {
+      expect(alert.querySelector("p")?.textContent).toBe(message);
+      expect(banner).not.toMatch(/nothing about any worker/);
+    }
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       text: "an alert",

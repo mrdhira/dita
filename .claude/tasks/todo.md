@@ -311,3 +311,22 @@ Baseline before any change: `pnpm vitest run --maxWorkers=2` → 12 files, 96 te
 - Result: 25 dashboard mutants, all killed (A1–A6, E1–E3, B1–B4, D1–D3, C1–C6, C5b, N1, N2) plus
   the status-0 no-retry guard. 283 tests. Every new commit builds, lints and passes on its own.
 - Landing chunk 116.00 kB gzip + css 4.56 + html 0.28 = 120.84 kB (budget 170).
+
+## Review round three (`.claude/tasks/console-r1-round3-fixes.md`, report at `.claude/review/report3.md`)
+- [x] MUST 1. `describeError` reads the **body**: a 5xx without the orchestrator's or a worker's JSON
+      (`error_type`, `worker`, `reason`) is "the orchestrator (or, on its reads, the gateway), or
+      something in front of it, answered N" on every route. "No model" only from a body that
+      carries it. Docstring and PR line corrected. Tests: History and Templates (empty 502,
+      reasonless 503), Decide (the worker's own 503).
+- [x] SHOULD 2. `READ_DEADLINE_MS = 2 × GATEWAY_PROBE_TIMEOUT_MS + margin` (15 s); a contract test
+      reads `DefaultProbeTimeout` from the Go source; a behaviour test accepts a 10.2 s answer.
+      Hang tests derive their times from the constants.
+- [x] SHOULD 3. Test: no "late" while the tab is hidden.
+- [x] NIT. A hung read (`NoAnswer`) reads "has not answered", not "failed". PR: three disproved claims
+      corrected, "Third review" section, metrics-parsing weaknesses disclosed, phone-label wording
+      narrowed.
+- Result: 11 new mutants, all killed (M1a–M1d, S2a–S2d, S3, and two on the NoAnswer mapping),
+  plus the behaviour test seen red with its precondition removed. 296 tests. Every new commit
+  builds and lints on its own; one run at `ce5f00d` showed "1 failed" that did not reproduce in
+  18 further runs, and its name was not captured.
+- Screenshot 8 retaken: a hang now reads "has not answered".

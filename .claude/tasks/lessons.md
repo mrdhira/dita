@@ -79,3 +79,16 @@
   caught it.
 - **Rule:** the dashboard's type gate is `pnpm build` (`tsc -b`). Run it before every commit, and
   build each commit of a series on its own before pushing.
+
+## Fix the class, not the routes the reviewer named
+- **Pattern:** round two fixed "a bare 5xx blames the worker" on `/workers` and `/metrics` only,
+  the two routes the report named, and then wrote a docstring claiming the rest was already right.
+  Every other page kept the bug, and the docstring was false.
+- **Rule:** when a finding names instances, grep for the mechanism (`describeError`, every caller of
+  `ErrorBanner`) and fix every instance. Decide from the evidence the input carries (the body), not
+  from where it came from (the route). Never document a scope you have not tested.
+
+## A gate loop that prints only the summary loses the flake
+- **Pattern:** a per-commit build/lint/test loop printed `Tests 1 failed | 291 passed` and nothing
+  else. The failure did not reproduce in 18 runs, and which test it was is now unknowable.
+- **Rule:** every gate loop prints the `FAIL` lines and the first assertion, not just the count.

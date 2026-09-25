@@ -1,5 +1,4 @@
 # Lessons
-
 ## Never commit on `main`
 - **Pattern:** a runner prompt said "on the current branch" while the order named a branch and a
   PR; I committed five commits onto `main`.
@@ -41,3 +40,11 @@
 - **Rule:** before mutating a seam that points at an outside service, make that service
   unreachable for the run (an unroutable proxy in the environment, e.g. `HTTPS_PROXY=http://127.0.0.1:1`),
   or skip that mutant and say so.
+
+## A client that decides a server verdict becomes a second source of truth
+- **Pattern:** I made Decide judge "usable" with the editor's authoring rules (`draftSchema`), while
+  the runtime deliberately keeps older templates running; the live template would have been blocked.
+- **Rule:** when a verdict has an owner (the runtime, the server), the client displays it. Its own
+  rules validate only its own state; any fallback for an older server says so in a comment.
+- **Check:** before reusing a validation schema for a different question ("may this run?" versus
+  "may this be saved?"), find who answers that question on the server.

@@ -1,6 +1,9 @@
 # The dashboard's origin: the static SPA and a same-origin /api proxy to the orchestrator.
-# Loopback / dev origin only. There is no LAN hostname until the orchestrator has auth; the
-# block for one is the same with the address and `tls internal` changed, and it is gated.
+# This file serves the loopback origin (compose and the e2e). The deployed origin is a site
+# block in the box's own Caddy, copied from this one by hand: inferences.home.arpa, live on the
+# LAN, as is orchestrator.api.home.arpa, and neither has auth. Keeping LAN users out belongs in
+# Caddy (basic_auth or forward_auth); a header the proxy adds authenticates the proxy, and it
+# would add it to every request that reaches this origin, cross-site ones included.
 {
 	admin off
 	local_certs

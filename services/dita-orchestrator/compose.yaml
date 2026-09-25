@@ -23,12 +23,18 @@ services:
       # The reranker needs up to ~85 s for 32 pairs under load.
       INFERENCES_TIMEOUT: 120s
       DECISIONS_DIR: /data/decisions
+      # Off when empty. For programmatic clients; never injected by a proxy (gateway doc, "Writes").
+      INFERENCES_API_TOKEN: ${INFERENCES_API_TOKEN:-}
+      # The GC works against the container's real ceiling instead of letting the heap double past it.
+      GOMEMLIMIT: 200MiB
     volumes:
       # The training store: prediction and correction pairs, append-only. A named volume,
       # so `compose down` and a redeploy keep it; only `down -v` would drop it, and must not.
       - dita-decisions:/data/decisions
-    # Loopback only: the gateway has no auth yet, so a host process may reach it and the LAN
-    # may not. Caddy, on `proxy`, reaches it by name.
+    # Published on loopback only, which does not keep the LAN out: the host's Caddy proxies
+    # orchestrator.api.home.arpa here by name on `proxy`, and every container on `proxy` reaches
+    # it directly. Writes are guarded in the app (cross-site and non-JSON POSTs refused) and by
+    # INFERENCES_API_TOKEN when it is set; reads are open to anyone who can reach it.
     ports:
       - "127.0.0.1:2104:2104"
     mem_limit: 256m

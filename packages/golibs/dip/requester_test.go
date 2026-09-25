@@ -30,9 +30,28 @@ type fakeReceiver struct {
 	answer   func(op string, control map[string]any, payload []byte) any
 }
 
+// sockPath is a socket path short enough to bind. The kernel caps a unix socket's sun_path at 108
+// bytes and refuses anything longer with EINVAL, and t.TempDir() is built from $TMPDIR plus the test
+// name, so a long $TMPDIR (a deep workspace, an agent session) or a long test name blows the limit
+// while the test itself is perfectly fine. Prefer the test's own directory when it fits, and a short
+// one under /tmp when it does not.
+func sockPath(t *testing.T) string {
+	t.Helper()
+	const limit = 100 // sun_path is 108 bytes including the terminator; stay clear of the edge
+	if dir := t.TempDir(); len(filepath.Join(dir, "dip.sock")) < limit {
+		return filepath.Join(dir, "dip.sock")
+	}
+	dir, err := os.MkdirTemp("/tmp", "dip")
+	if err != nil {
+		t.Skipf("no directory short enough for a unix socket (TMPDIR is %d bytes): %v", len(os.TempDir()), err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "dip.sock")
+}
+
 func startReceiver(t *testing.T, answer func(op string, control map[string]any, payload []byte) any) *fakeReceiver {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "dip.sock")
+	path := sockPath(t)
 	address, err := net.ResolveUnixAddr("unixpacket", path)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)

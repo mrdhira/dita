@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import rerankerMetrics from "../../test/reranker.metrics.txt?raw";
@@ -226,7 +226,7 @@ describe("ServicePage", () => {
           const region = await screen.findByRole("region", {
             name: tab ? "resident" : "resident model",
           });
-          await vi.waitFor(() => {
+          await waitFor(() => {
             expect(region.textContent).toContain(c.want);
           });
           if (c.want.startsWith("The resident model is unknown")) {
@@ -355,7 +355,7 @@ describe("ServicePage", () => {
     expect(rerankerMetrics).toMatch(/^# TYPE dita_worker_errors_total counter$/m);
     open("/services/reranker");
     const figure = await screen.findByText("DIP failures, since the last restart");
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(figure.nextSibling?.textContent).toBe("0");
     });
   });
@@ -386,12 +386,9 @@ describe("ServicePage", () => {
     const waiting = await screen.findByRole("button", {
       name: /^Waiting for the worker… \d+\.\d s$/,
     });
-    await vi.waitFor(
-      () => {
-        expect(waiting.textContent).not.toBe("Waiting for the worker… 0.0 s");
-      },
-      { timeout: 2_000 },
-    );
+    await waitFor(() => {
+      expect(waiting.textContent).not.toBe("Waiting for the worker… 0.0 s");
+    });
     answer(new Response("[[0.1]]", { status: 200 }));
     expect(await screen.findByText("[[0.1]]")).toBeTruthy();
     expect(screen.queryByText(/Waiting for the worker/)).toBeNull();

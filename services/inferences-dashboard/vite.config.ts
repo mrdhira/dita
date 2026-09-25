@@ -20,6 +20,8 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["src/test/setup.ts"],
+    // Above the 5 s async wait in setup.ts, so a wait that runs out fails with its own message.
+    testTimeout: 15_000,
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],

@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GATEWAY_PROBE_TIMEOUT_MS, READ_DEADLINE_MS, type WorkerReport } from "../api/client";
 import rerankerMetrics from "../test/reranker.metrics.txt?raw";
@@ -178,7 +178,7 @@ describe("FleetPage", () => {
       });
       renderAt("/", "/", <FleetPage />);
       const r = await row("inferences-reranker");
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(cellText(r, 3)).toBe(want);
       });
       if (want === "—") {
@@ -436,7 +436,7 @@ describe("FleetPage", () => {
       });
       renderAt("/", "/", <FleetPage />);
       const r = await row("inferences-reranker");
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(cellText(r, 3)).toBe("1 h 12 min");
       });
 

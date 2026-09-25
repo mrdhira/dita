@@ -4,7 +4,16 @@ import { fromDraft, templateResolver, toDraft, type TemplateForm } from "./templ
 const form: TemplateForm = {
   name: "alert-triage",
   description: "",
-  questions: [{ name: "severity", type: "score", optionsText: "1\n2\n\n3 ", min: "1", max: "3" }],
+  questions: [
+    {
+      name: "severity",
+      type: "score",
+      optionsText: "1\n2\n\n3 ",
+      min: "1",
+      max: "3",
+      criteria: " How severe is this homelab alert? ",
+    },
+  ],
 };
 
 describe("the template editor's resolver", () => {
@@ -13,7 +22,13 @@ describe("the template editor's resolver", () => {
       name: "alert-triage",
       description: "",
       questions: [
-        { name: "severity", type: "score", options: ["1", "2", "3"], range: { min: 1, max: 3 } },
+        {
+          name: "severity",
+          type: "score",
+          options: ["1", "2", "3"],
+          range: { min: 1, max: 3 },
+          criteria: "How severe is this homelab alert?",
+        },
       ],
     });
     expect(toDraft(fromDraft(toDraft(form)))).toEqual(toDraft(form));
@@ -27,7 +42,25 @@ describe("the template editor's resolver", () => {
       questions: [{ name: "severity", type: "choice", options: ["info", "warning"], criteria }],
     };
     expect(toDraft(fromDraft(draft)).questions[0]?.criteria).toBe(criteria);
-    expect(toDraft(fromDraft(toDraft(form))).questions[0]).not.toHaveProperty("criteria");
+  });
+
+  it("gives a stored question without criteria an empty field, which the rules refuse", async () => {
+    const draft = {
+      name: "alert-triage",
+      description: "",
+      questions: [{ name: "severity", type: "choice", options: ["info", "warning"] }],
+    };
+    const loaded = fromDraft(draft);
+    expect(loaded.questions[0]?.criteria).toBe("");
+    const result = await templateResolver(loaded, undefined, {
+      fields: {},
+      shouldUseNativeValidation: false,
+    });
+    const q = (result.errors as { questions?: Record<string, { message: string }>[] })
+      .questions?.[0];
+    expect(q?.criteria?.message).toBe(
+      "criteria are required: the model reads them as the question, not its name",
+    );
   });
 
   it("puts an option fault on the options field and a range fault on min", async () => {

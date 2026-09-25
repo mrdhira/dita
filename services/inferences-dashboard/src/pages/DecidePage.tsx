@@ -1,9 +1,25 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router";
-import { api } from "../api/client";
+import { Link, useNavigate } from "react-router";
+import { api, type Template } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { MAX_TEXT, chars, decisionRequestSchema, issuePaths } from "../contract/schema";
+import { usability, type Usability } from "../lib/usability";
+
+const key = (t: Template) => `${t.name}@${t.version}`;
+
+const faultText = (faults: { path: string; message: string }[]) =>
+  faults.map((f) => `${f.path}: ${f.message}`).join("; ");
+
+function label(t: Template, u: Usability): string {
+  const head = `${t.name} v${t.version}`;
+  if (t.retired) return `${head} — retired`;
+  if (!u.usable) {
+    return `${head} — cannot be used: ${u.faults[0]?.message ?? "the orchestrator will not run it"}`;
+  }
+  const size = `${head} (${t.questions.length} questions)`;
+  return u.authoring.length > 0 ? `${size} — runs, but needs updating` : size;
+}
 
 export function DecidePage() {
   const navigate = useNavigate();
@@ -19,8 +35,11 @@ export function DecidePage() {
     },
   });
 
-  const list = templates.data?.templates ?? [];
-  const chosen = list.find((t) => `${t.name}@${t.version}` === picked) ?? list[0];
+  // One the runtime refuses stays listed with its reason, but is never the default and never sent.
+  const list = (templates.data?.templates ?? []).map((t) => ({ t, u: usability(t) }));
+  const usable = list.filter(({ t, u }) => !t.retired && u.usable);
+  const chosen =
+    list.find(({ t }) => !t.retired && key(t) === picked) ?? (picked ? undefined : usable[0]);
 
   return (
     <form
@@ -29,7 +48,14 @@ export function DecidePage() {
       onSubmit={(e) => {
         e.preventDefault();
         if (!chosen) return;
-        const body = { text, schema: { name: chosen.name, version: chosen.version } };
+        const { t, u } = chosen;
+        if (!u.usable) {
+          setClientIssues([
+            `${t.name} v${t.version} cannot be used: ${faultText(u.faults) || "the orchestrator will not run it"}`,
+          ]);
+          return;
+        }
+        const body = { text, schema: { name: t.name, version: t.version } };
         const parsed = decisionRequestSchema.safeParse(body);
         setClientIssues(parsed.success ? [] : issuePaths(parsed.error));
         if (parsed.success) decide.mutate(body);
@@ -55,22 +81,38 @@ export function DecidePage() {
         Schema template
         <select
           name="template"
-          value={chosen ? `${chosen.name}@${chosen.version}` : ""}
+          value={chosen ? key(chosen.t) : ""}
           onChange={(e) => {
             setPicked(e.target.value);
           }}
           className="mt-1 block rounded-md border border-slate-300 p-2 text-sm"
         >
-          {list.map((t) => (
-            <option key={t.name} value={`${t.name}@${t.version}`}>
-              {t.name} v{t.version} ({t.questions.length} questions)
+          {!chosen && <option value="">choose a template</option>}
+          {list.map(({ t, u }) => (
+            <option key={key(t)} value={key(t)} disabled={t.retired}>
+              {label(t, u)}
             </option>
           ))}
         </select>
       </label>
+      {chosen && chosen.u.usable && chosen.u.authoring.length > 0 && (
+        <p className="text-sm text-amber-900">
+          {chosen.t.name} v{chosen.t.version} runs, but was saved before today&apos;s editing rules:{" "}
+          {faultText(chosen.u.authoring)}. To bring it up to date, load it under{" "}
+          <Link to="/templates" className="text-indigo-700 underline">
+            Templates
+          </Link>{" "}
+          and save the next version.
+        </p>
+      )}
       {list.length === 0 && templates.isSuccess && (
         <p className="text-sm text-slate-600">
           No templates yet: define one under Templates first.
+        </p>
+      )}
+      {list.length > 0 && usable.length === 0 && (
+        <p className="text-sm text-slate-600">
+          None of these templates can be used: save a new version of one under Templates.
         </p>
       )}
       {templates.error && <ErrorBanner error={templates.error} />}

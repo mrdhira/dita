@@ -352,6 +352,21 @@ describe("FleetPage", () => {
       expect(signals.length).toBeGreaterThan(2);
     });
 
+    for (const [what, status, body] of [
+      ["Caddy's empty 502, the orchestrator down", 502, ""],
+      ["a proxy's reasonless 503", 503, "Service Unavailable"],
+    ] as const) {
+      it(`blames the gateway, never a worker or its model, for ${what}`, async () => {
+        stubApi({ "GET /workers": () => ({ status, body }) });
+        renderAt("/", "/", <FleetPage />);
+        await act(() => vi.advanceTimersByTimeAsync(5_000));
+        const banner = screen.getByRole("alert").textContent;
+        expect(banner).toContain(`The gateway, or something in front of it, answered ${status}`);
+        expect(banner).toContain("/workers");
+        expect(banner).not.toMatch(/no model|The worker answered/);
+      });
+    }
+
     it("drops resident-for to — when the worker's /metrics stops answering", async () => {
       let failing = false;
       stubApi({

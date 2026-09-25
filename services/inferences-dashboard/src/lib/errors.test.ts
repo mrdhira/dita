@@ -44,6 +44,77 @@ describe("describeError", () => {
     expect(describeError(new ApiError(status, problem)).title).toContain(title);
   });
 
+  describe("on the console's reads of the gateway, a 5xx that names no worker is not the worker's", () => {
+    it.each([
+      [
+        "/workers",
+        503,
+        { error: "Service Unavailable" },
+        "The gateway, or something in front of it, answered 503",
+      ],
+      ["/workers", 502, { error: "" }, "The gateway, or something in front of it, answered 502"],
+      [
+        "/metrics/reranker",
+        503,
+        { error: "" },
+        "The gateway, or something in front of it, answered 503",
+      ],
+      [
+        "/metrics/reranker",
+        502,
+        { error: "Bad Gateway" },
+        "The gateway, or something in front of it, answered 502",
+      ],
+      [
+        "/workers",
+        0,
+        { error: "no answer within 10 s", error_type: "NoAnswer" },
+        "The gateway did not answer in time",
+      ],
+      [
+        "/metrics/reranker",
+        502,
+        { error: "x", reason: "too_large", worker: "inferences-reranker" },
+        "The worker answered in a shape it was not asked for",
+      ],
+      [
+        "/metrics/reranker",
+        503,
+        {
+          error: "inferences-reranker is not running",
+          reason: "not_running",
+          worker: "inferences-reranker",
+        },
+        "inferences-reranker is not running",
+      ],
+      [
+        "/metrics/reranker",
+        503,
+        { error: "x", worker: "inferences-reranker" },
+        "The worker could not be reached",
+      ],
+      [undefined, 503, { error: "no model is loaded" }, "The worker has no model loaded"],
+      [
+        undefined,
+        502,
+        { error: "reading the worker's answer: EOF" },
+        "The worker answered in a shape it was not asked for",
+      ],
+    ])("%s %i %j", (route, status, problem, title) => {
+      const { title: got, detail } = describeError(new ApiError(status, problem, route));
+      expect(got).toBe(title);
+      if (route && got.startsWith("The gateway")) {
+        expect(detail).toContain(route);
+        expect(`${got} ${detail}`).not.toMatch(/no model loaded/);
+      }
+    });
+
+    it("reads a page that is not a worker's /metrics as that, on any route", () => {
+      const error = new ApiError(502, { error: "it came as text/html", error_type: "NotMetrics" });
+      expect(describeError(error).title).toBe("The answer is not a worker's /metrics page");
+    });
+  });
+
   it("says nothing was recorded when the worker could not answer", () => {
     expect(describeError(new ApiError(503, { error: "no model is loaded" })).detail).toContain(
       "Nothing was recorded",

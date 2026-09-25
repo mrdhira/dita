@@ -389,6 +389,17 @@ describe("ServicePage", () => {
       expect(screen.getAllByText(/paused while this tab is hidden/)).toHaveLength(2);
     });
 
+    it("metrics: a reasonless 503 from in front of the gateway never reads as no model", async () => {
+      open("/services/reranker/metrics", {
+        "GET /metrics/reranker": () => ({ status: 503, body: "" }),
+      });
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      const banner = screen.getByRole("alert").textContent;
+      expect(banner).toContain("The gateway, or something in front of it, answered 503");
+      expect(banner).toContain("/metrics/reranker");
+      expect(banner).not.toMatch(/no model/);
+    });
+
     it("marks the header stale when a /workers refresh hangs", async () => {
       let n = 0;
       vi.stubGlobal("fetch", (input: string) => {

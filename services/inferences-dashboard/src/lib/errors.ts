@@ -1,14 +1,50 @@
-import { ApiError } from "../api/client";
+import { ApiError, type Problem } from "../api/client";
+
+const isGatewayRead = (route: string | undefined) =>
+  route === "/workers" || route?.startsWith("/metrics/") === true;
+
+/**
+ * The console's reads of the gateway (/workers, /metrics/…). The gateway answers them with 200 or
+ * its own JSON naming the worker, so a 5xx that names no worker came from the gateway or something
+ * in front of it, and says nothing about any worker or its model.
+ */
+function describeRead(route: string, status: number, problem: Problem) {
+  if (problem.error_type === "NoAnswer") {
+    return {
+      title: "The gateway did not answer in time",
+      detail: `${route}: ${problem.error}. What is shown is the last good answer, if any.`,
+    };
+  }
+  if (problem.reason === "not_running" && problem.worker !== undefined) {
+    return { title: `${problem.worker} is not running`, detail: `${problem.error}.` };
+  }
+  if (status >= 500 && problem.worker === undefined) {
+    return {
+      title: `The gateway, or something in front of it, answered ${status}`,
+      detail: `${route}: ${problem.error || "no body"}. This says nothing about any worker or its model.`,
+    };
+  }
+  return null;
+}
 
 /**
  * What a person should read for a failed request. Each status is measured behaviour, not a
- * generic failure: a 503 with no gateway reason is the worker itself saying it has no model.
+ * generic failure. A 503 with no gateway reason is the worker itself saying it has no model only
+ * on a pass-through route (Try it, decide); on the console's own reads it is never read that way.
  */
 export function describeError(error: unknown): { title: string; detail: string } {
   if (!(error instanceof ApiError)) {
     return { title: "The request did not complete", detail: String(error) };
   }
-  const { status, problem } = error;
+  const { status, problem, route } = error;
+  if (problem.error_type === "NotMetrics") {
+    return { title: "The answer is not a worker's /metrics page", detail: problem.error };
+  }
+  const read = isGatewayRead(route);
+  if (read && route) {
+    const described = describeRead(route, status, problem);
+    if (described) return described;
+  }
   switch (true) {
     case status === 503 && problem.reason === "not_running":
       return {
@@ -20,7 +56,7 @@ export function describeError(error: unknown): { title: string; detail: string }
         title: "The worker is busy",
         detail: "It is at its connection limit. Nothing was recorded.",
       };
-    case status === 503 && problem.reason !== undefined:
+    case status === 503 && (problem.reason !== undefined || read):
       return {
         title: "The worker could not be reached",
         detail: `${problem.error}. Nothing was recorded.`,

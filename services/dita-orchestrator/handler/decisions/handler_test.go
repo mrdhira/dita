@@ -417,6 +417,12 @@ func TestAnEvaluationIsBoundedBeforeItIsBuilt(t *testing.T) {
 	if code, _, body := e.call("POST", "/evaluations", evaluationBody(decisions.MaxRows+1)); code != 400 || !strings.Contains(body, "between 1 and 10000 rows") {
 		t.Fatalf("MaxRows+1 rows: %d %s", code, body)
 	}
+	// decisions.Evaluate refuses MaxRows+1 with the same words, so only a row the decoder would
+	// itself refuse shows whether the handler stopped before building it.
+	unread := strings.TrimSuffix(evaluationBody(decisions.MaxRows), "]}") + `,{"unknown":1}]}`
+	if code, _, body := e.call("POST", "/evaluations", unread); code != 400 || !strings.Contains(body, "between 1 and 10000 rows") {
+		t.Fatalf("row MaxRows+1 was decoded: %d %s", code, body)
+	}
 
 	huge := evaluationBody(3 * decisions.MaxRows)
 	reader := &countingReader{r: strings.NewReader(huge)}

@@ -1,31 +1,27 @@
 import type { WorkerReport } from "../../api/client";
+import { residentOf } from "../../lib/fleet";
 import { IDENTITY } from "./info";
 import { InfoList } from "./InfoList";
+import { NoIdentity } from "./Resident";
 
 export function ModelsTab({ report }: { report: WorkerReport | undefined }) {
-  const info = report?.info;
-  const rest = info
-    ? Object.keys(info).filter((k) => !(IDENTITY as readonly string[]).includes(k))
-    : [];
+  const resident = residentOf(report);
   return (
     <div className="space-y-4">
       <section aria-label="resident" className="space-y-2 rounded-md border border-slate-200 p-3">
         <h3 className="text-sm font-semibold">Resident now</h3>
-        {info ? (
+        {resident.kind === "known" ? (
           <>
-            <InfoList info={info} keys={[...IDENTITY, ...rest]} />
+            <InfoList info={resident.info} keys={IDENTITY} />
             <details className="text-xs">
               <summary className="cursor-pointer text-slate-700">raw /info</summary>
               <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-2">
-                {JSON.stringify(info, null, 2)}
+                {JSON.stringify(resident.info, null, 2)}
               </pre>
             </details>
           </>
         ) : (
-          <p className="text-sm text-slate-700">
-            No model is resident. Only one model is ever resident in a worker; requests fail until
-            one is loaded.
-          </p>
+          <NoIdentity report={report} />
         )}
       </section>
       <section

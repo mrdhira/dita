@@ -1,3 +1,5 @@
+import { ApiError } from "../api/client";
+
 export type Unit = "count" | "seconds" | "bytes" | "flag";
 
 export interface SeriesDef {
@@ -127,12 +129,32 @@ function histogramsOf(name: string, samples: Sample[]): Histogram[] {
   return [...byLabels.values()];
 }
 
+const RECOGNISED = new Set([
+  ...SERIES.map((s) => s.name),
+  ...HISTOGRAMS.flatMap((h) => [`${h.name}_bucket`, `${h.name}_sum`, `${h.name}_count`]),
+]);
+
+/** A page with none of the series this console reads is refused: it would read as an idle worker. */
 export function readWorkerMetrics(text: string): WorkerMetrics {
   const samples = parseExposition(text);
+  if (!samples.some((s) => RECOGNISED.has(s.name))) {
+    throw new ApiError(502, {
+      error:
+        "the answer is not a worker's /metrics page: it has none of the series this console reads",
+      error_type: "NotMetrics",
+    });
+  }
   return {
     series: SERIES.map((def) => ({ def, samples: samples.filter((s) => s.name === def.name) })),
     histograms: HISTOGRAMS.map((h) => ({ ...h, series: histogramsOf(h.name, samples) })),
   };
+}
+
+/** Seconds resident, only while the worker's own gauge says a model is resident. */
+export function residentFor(metrics: WorkerMetrics): number | null {
+  return first(metrics, "dita_worker_model_resident") === 1
+    ? first(metrics, "dita_worker_model_resident_seconds")
+    : null;
 }
 
 export function first(metrics: WorkerMetrics, name: string): number | null {

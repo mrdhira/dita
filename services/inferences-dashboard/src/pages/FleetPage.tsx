@@ -4,27 +4,60 @@ import { Link } from "react-router";
 import { api, type WorkerReport } from "../api/client";
 import { AsOf } from "../components/AsOf";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { StateBadge } from "../components/StateBadge";
-import { FLEET, describeState, isDeployed, notDeployed, type Service } from "../lib/fleet";
+import { StaleNote, StateBadge } from "../components/StateBadge";
+import {
+  FLEET,
+  describeState,
+  isDeployed,
+  notDeployed,
+  residentOf,
+  type Service,
+} from "../lib/fleet";
+import { formatDuration, residentFor } from "../lib/metrics";
 import { usePollInterval } from "../lib/visibility";
+import { useWorkerMetrics } from "./service/useWorkerMetrics";
 
 const cell = "py-2 pr-4 align-top max-sm:block max-sm:py-0.5";
 
-function modelOf(report: WorkerReport | undefined) {
-  const info = report?.info;
-  const id = typeof info?.model_id === "string" ? info.model_id : null;
-  const sha = typeof info?.model_sha === "string" ? info.model_sha : null;
-  const rev = typeof info?.model_revision === "string" ? info.model_revision : null;
-  return { id, revision: (sha ?? rev)?.slice(0, 7) ?? null };
+function ResidentModel({
+  report,
+  deployed,
+}: {
+  report: WorkerReport | undefined;
+  deployed: boolean;
+}) {
+  const resident = residentOf(report);
+  if (!deployed) return <span className="text-slate-600">—</span>;
+  if (resident.kind === "none") return <span className="text-slate-600">none resident</span>;
+  const info = resident.kind === "known" ? resident.info : {};
+  const id = typeof info.model_id === "string" ? info.model_id : null;
+  const sha = typeof info.model_sha === "string" ? info.model_sha : null;
+  const rev = typeof info.model_revision === "string" ? info.model_revision : null;
+  const revision = (sha ?? rev)?.slice(0, 7);
+  if (!id) return <span className="text-slate-600">unknown</span>;
+  return (
+    <>
+      {id}
+      {revision && <span className="block text-slate-600">@{revision}</span>}
+    </>
+  );
+}
+
+function ResidentFor({ service }: { service: string }) {
+  const { query } = useWorkerMetrics(service);
+  const seconds = query.data && !query.isError ? residentFor(query.data) : null;
+  return <>{seconds === null ? "—" : formatDuration(seconds)}</>;
 }
 
 /** Memoised: a 5 s tick re-renders only the rows whose report changed (design §14). */
 const FleetRow = memo(function FleetRow({
   service,
   report,
+  staleSince,
 }: {
   service: Service;
   report: WorkerReport | undefined;
+  staleSince: number | null;
 }) {
   const deployed = isDeployed(service);
   const view = report
@@ -32,7 +65,7 @@ const FleetRow = memo(function FleetRow({
     : deployed
       ? { word: "not reported", tone: "idle" as const, shape: "?", sentence: "" }
       : notDeployed(service);
-  const model = modelOf(report);
+  const stale = report !== undefined && staleSince !== null;
   return (
     <tr
       aria-label={service.container}
@@ -43,20 +76,17 @@ const FleetRow = memo(function FleetRow({
         <span className="block text-xs text-slate-600">{service.role}</span>
       </td>
       <td className={cell}>
-        <StateBadge view={view} />
+        <StateBadge view={view} stale={stale} />
         {view.sentence && (
           <span className="mt-1 block text-xs text-slate-700">{view.sentence}</span>
         )}
+        {stale && <StaleNote at={staleSince} />}
       </td>
       <td className={`${cell} font-mono text-xs`}>
-        {model.id ? (
-          <>
-            {model.id}
-            {model.revision && <span className="block text-slate-600">@{model.revision}</span>}
-          </>
-        ) : (
-          <span className="text-slate-600">{deployed ? "none resident" : "—"}</span>
-        )}
+        <ResidentModel report={report} deployed={deployed} />
+      </td>
+      <td className={`${cell} font-mono text-xs`}>
+        {deployed ? <ResidentFor service={service.id} /> : "—"}
       </td>
       <td className={`${cell} max-w-xs text-xs break-words text-slate-700`}>
         {report?.error ?? "—"}
@@ -85,6 +115,8 @@ export function FleetPage() {
   const byName = new Map(workers.data?.workers.map((w) => [w.name, w]));
   const known = new Set(FLEET.map((s) => s.container));
   const extra = (workers.data?.workers ?? []).filter((w) => !known.has(w.name));
+  const staleSince = workers.isError && workers.data ? workers.dataUpdatedAt : null;
+  const unreported = FLEET.filter((s) => !isDeployed(s)).every((s) => !byName.has(s.container));
 
   return (
     <section aria-label="fleet" className="space-y-3">
@@ -99,13 +131,19 @@ export function FleetPage() {
             <th className="pr-4 font-normal">service</th>
             <th className="pr-4 font-normal">state</th>
             <th className="pr-4 font-normal">resident model</th>
+            <th className="pr-4 font-normal">resident for</th>
             <th className="pr-4 font-normal">last error</th>
             <th className="font-normal">details</th>
           </tr>
         </thead>
         <tbody className="max-sm:block">
           {FLEET.map((s) => (
-            <FleetRow key={s.id} service={s} report={byName.get(s.container)} />
+            <FleetRow
+              key={s.id}
+              service={s}
+              report={byName.get(s.container)}
+              staleSince={staleSince}
+            />
           ))}
           {extra.map((w) => (
             <FleetRow
@@ -117,13 +155,15 @@ export function FleetPage() {
                 reason: "",
               }}
               report={w}
+              staleSince={staleSince}
             />
           ))}
         </tbody>
       </table>
       <p className="text-xs text-slate-600">
-        The last three rows are the intended fleet, known to this console rather than reported by
-        the gateway: they have no HTTP surface to report from, and nothing here can start them.
+        Resident for is read from each worker&apos;s /metrics every 30 s.
+        {unreported &&
+          " The not-deployed rows are known to this console, not reported by the gateway: OCR speaks only DIP, which the gateway does not probe, and STT and TTS have no code yet. Nothing here can start them."}
       </p>
     </section>
   );

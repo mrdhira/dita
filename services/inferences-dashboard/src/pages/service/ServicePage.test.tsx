@@ -1,6 +1,6 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import rerankerMetrics from "../../test/reranker.metrics.txt?raw";
 import { renderAt, stubApi } from "../../test/render";
 import { ServicePage } from "./ServicePage";
@@ -176,6 +176,238 @@ describe("ServicePage", () => {
     await userEvent.click(screen.getByRole("button", { name: "POST /api/inferences/decide" }));
     expect((await screen.findByRole("alert")).textContent).toContain("the body is not JSON");
     expect(calls.find((c) => c.method === "POST")?.body).toBe('{"text":"","questions":not json}');
+  });
+
+  it("models: identity inline, everything else only behind the expander", async () => {
+    open("/services/reranker/models");
+    const resident = await screen.findByRole("region", { name: "resident" });
+    await within(resident).findByText("jina-reranker-v1-turbo-en");
+    const inline = resident.querySelector("dl")?.textContent ?? "";
+    expect(inline).toContain("max_batch_tokens");
+    expect(inline).not.toContain("auto_truncate");
+    expect(resident.querySelector("details pre")?.textContent).toContain('"auto_truncate": true');
+  });
+
+  describe("the resident model is claimed only when the worker reports it", () => {
+    const withState = (state: string, info: unknown = null) => ({
+      "GET /workers": () => ({
+        status: 200,
+        body: {
+          workers: [{ ...reranker, state, info, health_status: state === "no_model" ? 503 : 200 }],
+        },
+      }),
+    });
+    const unknown = "The resident model is unknown: the gateway has no /info from this worker";
+    const cases = [
+      { name: "ready, but /info failed", routes: withState("ready"), want: unknown },
+      { name: "busy", routes: withState("busy"), want: unknown },
+      { name: "unreachable", routes: withState("unreachable"), want: unknown },
+      {
+        name: "/workers failed",
+        routes: { "GET /workers": () => ({ status: 400, body: { error: "no" } }) },
+        want: "The resident model is unknown: the gateway has not reported this worker",
+      },
+      {
+        name: "no_model",
+        routes: withState("no_model"),
+        want: "No model is resident: the worker says so itself",
+      },
+      {
+        name: "no_model, even if /info answered",
+        routes: withState("no_model", { model_id: "configured-not-resident" }),
+        want: "No model is resident: the worker says so itself",
+      },
+    ];
+    for (const c of cases) {
+      for (const tab of ["models", ""]) {
+        it(`${tab || "overview"}: ${c.name}`, async () => {
+          open(`/services/reranker${tab && `/${tab}`}`, c.routes);
+          const region = await screen.findByRole("region", {
+            name: tab ? "resident" : "resident model",
+          });
+          await vi.waitFor(() => {
+            expect(region.textContent).toContain(c.want);
+          });
+          if (c.want.startsWith("The resident model is unknown")) {
+            expect(document.body.textContent).not.toMatch(
+              /No model is resident|requests fail until one is loaded/,
+            );
+          }
+          expect(region.textContent).not.toContain("configured-not-resident");
+        });
+      }
+    }
+
+    it("while /workers is still pending", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => new Promise<Response>(() => undefined)),
+      );
+      renderAt("/services/reranker/models", "/services/:id/:tab?", <ServicePage />);
+      const region = await screen.findByRole("region", { name: "resident" });
+      expect(region.textContent).toContain(
+        "The resident model is unknown: the gateway has not reported this worker",
+      );
+      expect(document.body.textContent).not.toContain("No model is resident");
+    });
+  });
+
+  it("overview: resident for is a dash, never 0.0 s, when the gauge says nothing is resident", async () => {
+    const page = rerankerMetrics.replace(/^(dita_worker_model_resident\{[^}]*\}) 1$/m, "$1 0");
+    expect(page).not.toBe(rerankerMetrics);
+    open("/services/reranker", { "GET /metrics/reranker": () => ({ status: 200, body: page }) });
+    expect(await screen.findByText("318 MiB")).toBeTruthy();
+    expect(screen.getByText("resident for").nextSibling?.textContent).toBe("—");
+  });
+
+  it("overview: the /metrics figures carry their own as of, and say a load in flight", async () => {
+    const loading = rerankerMetrics.replace(/^(dita_worker_model_loading\{[^}]*\}) 0$/m, "$1 1");
+    expect(loading).not.toBe(rerankerMetrics);
+    open("/services/reranker", { "GET /metrics/reranker": () => ({ status: 200, body: loading }) });
+    const figures = await screen.findByRole("region", { name: "since the last restart" });
+    expect(await within(figures).findByText("loading a model right now")).toBeTruthy();
+    expect(within(figures).getByText(/^\d\d:\d\d:\d\d$/, { selector: "time" })).toBeTruthy();
+  });
+
+  describe("metrics: an answer that is not a /metrics page is an error, not an idle worker", () => {
+    const cases = [
+      {
+        name: "an HTML page served as 200",
+        answer: {
+          status: 200,
+          body: "<!doctype html><title>dashboard</title>",
+          headers: { "content-type": "text/html" },
+        },
+        says: "it came as text/html",
+      },
+      {
+        name: "plain text with none of the series",
+        answer: { status: 200, body: "some_other_exporter_total 3\n" },
+        says: "none of the series this console reads",
+      },
+      {
+        name: "the worker's own 404",
+        answer: {
+          status: 404,
+          body: "404 page not found",
+          headers: { "content-type": "text/plain" },
+        },
+        says: "404 page not found",
+      },
+    ];
+    for (const c of cases) {
+      it(c.name, async () => {
+        open("/services/reranker/metrics", { "GET /metrics/reranker": () => c.answer });
+        expect((await screen.findByRole("alert")).textContent).toContain(c.says);
+        expect(document.body.textContent).not.toContain("none since the last restart");
+        expect(screen.queryByRole("table", { name: "series" })).toBeNull();
+      });
+    }
+  });
+
+  it("says when the gateway does not report this service", async () => {
+    open("/services/reranker", { "GET /workers": () => ({ status: 200, body: { workers: [] } }) });
+    expect(await screen.findByText("The gateway does not report this service.")).toBeTruthy();
+  });
+
+  it("says there is no such service", async () => {
+    open("/services/nope");
+    expect(await screen.findByText("There is no service called nope")).toBeTruthy();
+  });
+
+  it("try it: shows how long it has been waiting for the worker", async () => {
+    let answer: (r: Response) => void = () => undefined;
+    const reply = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    open("/services/embedding/try");
+    const base = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+      init?.method === "POST" ? reply : base(input, init),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "POST /api/inferences/embed" }),
+    );
+    const waiting = await screen.findByRole("button", {
+      name: /^Waiting for the worker… \d+\.\d s$/,
+    });
+    await vi.waitFor(
+      () => {
+        expect(waiting.textContent).not.toBe("Waiting for the worker… 0.0 s");
+      },
+      { timeout: 2_000 },
+    );
+    answer(new Response("[[0.1]]", { status: 200 }));
+    expect(await screen.findByText("[[0.1]]")).toBeTruthy();
+    expect(screen.queryByText(/Waiting for the worker/)).toBeNull();
+  });
+
+  describe("polling", () => {
+    let visibility: DocumentVisibilityState = "visible";
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => visibility,
+      });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      visibility = "visible";
+    });
+    const count = (calls: { path: string }[], path: string) =>
+      calls.filter((c) => c.path === path).length;
+    const hide = async () => {
+      visibility = "hidden";
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        await Promise.resolve();
+      });
+    };
+
+    it("reads /workers every 10 s and /metrics every 30 s, and neither while hidden", async () => {
+      const calls = open("/services/reranker/metrics");
+      await screen.findByRole("region", { name: "inference duration" });
+      expect(count(calls, "/workers")).toBe(1);
+      expect(count(calls, "/metrics/reranker")).toBe(1);
+
+      await act(() => vi.advanceTimersByTimeAsync(9_900));
+      expect(count(calls, "/workers")).toBe(1);
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      expect(count(calls, "/workers")).toBe(2);
+
+      await act(() => vi.advanceTimersByTimeAsync(19_700));
+      expect(count(calls, "/metrics/reranker")).toBe(1);
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      expect(count(calls, "/metrics/reranker")).toBe(2);
+      expect(count(calls, "/workers")).toBe(4);
+
+      await hide();
+      await act(() => vi.advanceTimersByTimeAsync(120_000));
+      expect(count(calls, "/workers")).toBe(4);
+      expect(count(calls, "/metrics/reranker")).toBe(2);
+      expect(screen.getAllByText(/paused while this tab is hidden/)).toHaveLength(2);
+    });
+
+    it("marks the header stale when the latest /workers refresh failed", async () => {
+      let failing = false;
+      open("/services/reranker/metrics", {
+        "GET /workers": () =>
+          failing
+            ? { status: 502, body: { error: "down" } }
+            : { status: 200, body: { workers: [reranker] } },
+      });
+      const badge = await screen.findByText("ready", { exact: false, selector: "span[data-tone]" });
+      expect(badge.dataset.stale).toBeUndefined();
+      failing = true;
+      await act(() => vi.advanceTimersByTimeAsync(15_000));
+      expect(badge.dataset.stale).toBe("true");
+      expect(badge.textContent).toBe("●ready · stale");
+      expect(screen.getByText(/^stale: not refreshed since \d\d:\d\d:\d\d$/)).toBeTruthy();
+      expect(
+        screen.getByText(/the latest refresh failed; this is the last good answer/),
+      ).toBeTruthy();
+    });
   });
 
   it("a service that is not deployed has no tabs and no actions", async () => {

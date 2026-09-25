@@ -1,9 +1,18 @@
 import type { WorkerReport } from "../../api/client";
+import { AsOf } from "../../components/AsOf";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import type { DeployedService } from "../../lib/fleet";
-import { first, formatBytes, formatDuration, observations, total } from "../../lib/metrics";
+import { residentOf, type DeployedService } from "../../lib/fleet";
+import {
+  first,
+  formatBytes,
+  formatDuration,
+  observations,
+  residentFor,
+  total,
+} from "../../lib/metrics";
 import { IDENTITY } from "./info";
 import { InfoList } from "./InfoList";
+import { NoIdentity } from "./Resident";
 import { useWorkerMetrics } from "./useWorkerMetrics";
 
 function Figure({ label, value }: { label: string; value: string }) {
@@ -22,7 +31,8 @@ export function OverviewTab({
   service: DeployedService;
   report: WorkerReport | undefined;
 }) {
-  const { query } = useWorkerMetrics(service.id);
+  const { query, polling } = useWorkerMetrics(service.id);
+  const resident = residentOf(report);
   const m = query.data;
   const or = (v: number | null, f: (n: number) => string) => (v === null ? "—" : f(v));
   return (
@@ -33,17 +43,17 @@ export function OverviewTab({
       </p>
       <section aria-label="resident model" className="space-y-2">
         <h3 className="text-sm font-semibold">Resident model</h3>
-        {report?.info ? (
-          <InfoList info={report.info} keys={IDENTITY} />
+        {resident.kind === "known" ? (
+          <InfoList info={resident.info} keys={IDENTITY} />
         ) : (
-          <p className="text-sm text-slate-700">
-            No model identity: the worker&apos;s /info did not answer, which it does only while a
-            model is resident.
-          </p>
+          <NoIdentity report={report} />
         )}
       </section>
       <section aria-label="since the last restart" className="space-y-2">
-        <h3 className="text-sm font-semibold">From /metrics</h3>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold">From /metrics, every 30 s</h3>
+          <AsOf at={query.dataUpdatedAt} polling={polling} failed={query.isError} />
+        </div>
         {query.error && <ErrorBanner error={query.error} />}
         {m && (
           <>
@@ -51,10 +61,7 @@ export function OverviewTab({
               <p className="text-sm text-amber-900">loading a model right now</p>
             )}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Figure
-                label="resident for"
-                value={or(first(m, "dita_worker_model_resident_seconds"), formatDuration)}
-              />
+              <Figure label="resident for" value={or(residentFor(m), formatDuration)} />
               <Figure
                 label="RAM now"
                 value={or(first(m, "process_resident_memory_bytes"), formatBytes)}

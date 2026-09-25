@@ -20,6 +20,11 @@ export function describeError(error: unknown): { title: string; detail: string }
         title: "The worker is busy",
         detail: "It is at its connection limit. Nothing was recorded.",
       };
+    case status === 503 && problem.reason !== undefined:
+      return {
+        title: "The worker could not be reached",
+        detail: `${problem.error}. Nothing was recorded.`,
+      };
     case status === 503:
       return {
         title: "The worker has no model loaded",

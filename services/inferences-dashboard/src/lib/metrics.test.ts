@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseExposition, readWorkerMetrics } from "./metrics";
+import { ApiError } from "../api/client";
+import { parseExposition, readWorkerMetrics, residentFor } from "./metrics";
 
 describe("parseExposition", () => {
   const cases = [
@@ -51,5 +52,29 @@ describe("readWorkerMetrics", () => {
         count: 2,
       },
     ]);
+  });
+});
+
+describe("readWorkerMetrics refuses a page it cannot read", () => {
+  it.each([
+    ["an HTML page", "<!doctype html><html><body>app</body></html>"],
+    ["an empty body", ""],
+    ["another exporter's page", "go_goroutines 12\nhttp_requests_total 3\n"],
+  ])("%s", (_, page) => {
+    expect(() => readWorkerMetrics(page)).toThrow(ApiError);
+  });
+
+  it("accepts a page with one series it reads", () => {
+    expect(readWorkerMetrics("dita_worker_uptime_seconds 3\n").series.length).toBeGreaterThan(0);
+  });
+});
+
+describe("residentFor", () => {
+  it.each([
+    ["resident", "dita_worker_model_resident 1\ndita_worker_model_resident_seconds 42\n", 42],
+    ["not resident", "dita_worker_model_resident 0\ndita_worker_model_resident_seconds 0\n", null],
+    ["no gauge", "dita_worker_model_resident_seconds 42\n", null],
+  ])("%s", (_, page, want) => {
+    expect(residentFor(readWorkerMetrics(page))).toBe(want);
   });
 });

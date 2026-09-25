@@ -24,8 +24,8 @@ export const isDeployed = (s: Service): s is DeployedService => "tryRoute" in s;
 const HINDSIGHT = "Hindsight recall and consolidation use this: while it is not ready, both fail.";
 
 /**
- * The intended fleet. Frontend knowledge, not API data: the gateway reports only the three
- * services it is configured for, and the other three have no HTTP surface to report from.
+ * The intended fleet. Frontend knowledge, not API data: the gateway probes only the three HTTP
+ * workers. OCR speaks DIP alone, which the gateway does not probe; STT and TTS have no code.
  */
 export const FLEET: readonly Service[] = [
   {
@@ -105,6 +105,26 @@ export function describeState(report: WorkerReport): StateView {
     return { ...known, sentence: modelId ? `serving ${modelId}` : "serving" };
   }
   return { ...known, sentence: reported };
+}
+
+export type Resident =
+  | { kind: "known"; info: Record<string, unknown> }
+  | { kind: "none" }
+  | { kind: "unknown"; why: string };
+
+/**
+ * Design §13: "none resident" is the worker's own no_model answer. A missing /info is also what a
+ * pending or failed /workers, a busy worker and a failed second probe look like, so it is unknown.
+ */
+export function residentOf(report: WorkerReport | undefined): Resident {
+  if (report?.state === "no_model") return { kind: "none" };
+  if (report?.info) return { kind: "known", info: report.info };
+  return {
+    kind: "unknown",
+    why: report
+      ? "the gateway has no /info from this worker"
+      : "the gateway has not reported this worker",
+  };
 }
 
 export function notDeployed(service: UndeployedService): StateView {

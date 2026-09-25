@@ -18,6 +18,12 @@ describe("describeError", () => {
       "The worker has no model loaded",
     ],
     [
+      "the gateway: the worker is unreachable, which says nothing of its model",
+      503,
+      { error: "x", reason: "unreachable" },
+      "The worker could not be reached",
+    ],
+    [
       "a malformed schema",
       400,
       { error: "x", issues: [{ path: "questions.0.name", message: "bad" }] },

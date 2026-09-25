@@ -3,7 +3,7 @@ import { Link, NavLink, useParams } from "react-router";
 import { api } from "../../api/client";
 import { AsOf } from "../../components/AsOf";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import { StateBadge } from "../../components/StateBadge";
+import { StaleNote, StateBadge } from "../../components/StateBadge";
 import { describeState, isDeployed, notDeployed, serviceById } from "../../lib/fleet";
 import { usePollInterval } from "../../lib/visibility";
 import { LogsTab } from "./LogsTab";
@@ -61,6 +61,7 @@ export function ServicePage() {
   const report = workers.data?.workers.find((w) => w.name === service.container);
   const current = TABS.find((t) => t.path === tab);
   const view = report ? describeState(report) : null;
+  const stale = workers.isError && report !== undefined;
   return (
     <section aria-label={service.container} className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -70,10 +71,11 @@ export function ServicePage() {
           </h2>
           {view && (
             <p className="flex flex-wrap items-center gap-2 text-sm">
-              <StateBadge view={view} />
+              <StateBadge view={view} stale={stale} />
               <span>{view.sentence}</span>
             </p>
           )}
+          {stale && <StaleNote at={workers.dataUpdatedAt} />}
         </div>
         <AsOf at={workers.dataUpdatedAt} polling={interval !== false} failed={workers.isError} />
       </div>

@@ -185,7 +185,14 @@ async function metricsText(service: string): Promise<string> {
     headers: { Accept: "text/plain" },
   });
   const text = await res.text();
-  if (res.ok) return text;
+  const type = res.headers.get("content-type") ?? "";
+  if (res.ok && type.startsWith("text/plain")) return text;
+  if (res.ok) {
+    throw new ApiError(502, {
+      error: `the answer is not a /metrics page: it came as ${type || "no content type"}`,
+      error_type: "NotMetrics",
+    });
+  }
   let parsed: unknown = null;
   try {
     parsed = JSON.parse(text);

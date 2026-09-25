@@ -42,9 +42,9 @@ describe("the worker strip", () => {
     const strip = screen.getByRole("list", { name: "workers" });
     const items = (await within(strip).findAllByRole("listitem")).map((li) => li.textContent);
     expect(items).toEqual([
-      "inferences-embedding: ready",
-      "inferences-reranker: ready",
-      "inferences-system-one: not running",
+      "inferences-embedding: ● ready",
+      "inferences-reranker: ● ready",
+      "inferences-system-one: ■ stopped",
     ]);
     expect(screen.getByText("the page itself")).toBeTruthy();
   });

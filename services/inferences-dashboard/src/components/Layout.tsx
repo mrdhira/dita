@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { NavLink, Outlet } from "react-router";
 import { api } from "../api/client";
+import { describeState, type Tone } from "../lib/fleet";
 
 const sections = [
   { to: "/", label: "Fleet" },
@@ -37,6 +38,13 @@ function Links({ label, links }: { label: string; links: typeof sections }) {
   );
 }
 
+const strip: Record<Tone, string> = {
+  good: "bg-emerald-100 text-emerald-900",
+  warn: "bg-amber-100 text-amber-900",
+  bad: "bg-red-100 text-red-900",
+  idle: "bg-slate-100 text-slate-800",
+};
+
 /** A worker that is not running is a state to show, not a failure that breaks the page. */
 function WorkerStrip() {
   const workers = useQuery({
@@ -47,15 +55,19 @@ function WorkerStrip() {
   if (workers.isError) return <p className="text-xs text-slate-500">worker status unavailable</p>;
   return (
     <ul aria-label="workers" className="flex flex-wrap gap-2 text-xs">
-      {workers.data?.workers.map((w) => (
-        <li
-          key={w.name}
-          title={w.error ?? w.url}
-          className={`rounded px-2 py-0.5 ${w.state === "ready" ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}
-        >
-          {w.name}: {w.state.replace("_", " ")}
-        </li>
-      ))}
+      {workers.data?.workers.map((w) => {
+        const view = describeState(w);
+        return (
+          <li
+            key={w.name}
+            title={w.error ?? w.url}
+            data-tone={view.tone}
+            className={`rounded px-2 py-0.5 ${strip[view.tone]}`}
+          >
+            {w.name}: <span aria-hidden="true">{view.shape}</span> {view.word}
+          </li>
+        );
+      })}
     </ul>
   );
 }

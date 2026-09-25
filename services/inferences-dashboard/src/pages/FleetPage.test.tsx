@@ -1,6 +1,7 @@
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkerReport } from "../api/client";
+import rerankerMetrics from "../test/reranker.metrics.txt?raw";
 import { renderAt, stubApi } from "../test/render";
 import { FleetPage } from "./FleetPage";
 
@@ -16,6 +17,8 @@ const report = (name: string, state: string, extra: Partial<WorkerReport> = {}):
 function fleet(...workers: WorkerReport[]) {
   return stubApi({ "GET /workers": () => ({ status: 200, body: { workers } }) });
 }
+
+const cellText = (r: HTMLElement, i: number) => r.querySelectorAll("td")[i]?.textContent;
 
 /** The rows exist before the answer does, so wait for the answer first. */
 async function row(name: string) {
@@ -99,6 +102,122 @@ describe("FleetPage", () => {
     expect(within(r).queryAllByRole("button")).toHaveLength(0);
   });
 
+  describe("the resident model is claimed only when the worker reports it", () => {
+    const cases = [
+      {
+        name: "ready, but the second probe (/info) failed",
+        report: report("inferences-embedding", "ready"),
+        want: "unknown",
+      },
+      {
+        name: "busy: a model may well be resident",
+        report: report("inferences-embedding", "busy"),
+        want: "unknown",
+      },
+      { name: "timeout", report: report("inferences-embedding", "timeout"), want: "unknown" },
+      {
+        name: "no_model: the worker says so itself",
+        report: report("inferences-embedding", "no_model", { health_status: 503 }),
+        want: "none resident",
+      },
+      {
+        name: "ready with /info",
+        report: report("inferences-embedding", "ready", {
+          info: { model_id: "qwen3-embedding-0.6b" },
+        }),
+        want: "qwen3-embedding-0.6b",
+      },
+    ];
+    for (const c of cases) {
+      it(c.name, async () => {
+        fleet(c.report);
+        renderAt("/", "/", <FleetPage />);
+        const r = await row("inferences-embedding");
+        expect(cellText(r, 2)).toBe(c.want);
+      });
+    }
+
+    it("says unknown, never none resident, while /workers has not answered", () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => new Promise<Response>(() => undefined)),
+      );
+      renderAt("/", "/", <FleetPage />);
+      const r = screen.getByRole("row", { name: "inferences-embedding" });
+      expect(cellText(r, 1)).toBe("?not reported");
+      expect(cellText(r, 2)).toBe("unknown");
+      expect(document.body.textContent).not.toContain("none resident");
+    });
+
+    it("says unknown, never none resident, when /workers failed", async () => {
+      stubApi({ "GET /workers": () => ({ status: 400, body: { error: "gateway says no" } }) });
+      renderAt("/", "/", <FleetPage />);
+      expect((await screen.findByRole("alert")).textContent).toContain("gateway says no");
+      const r = screen.getByRole("row", { name: "inferences-embedding" });
+      expect(cellText(r, 1)).toBe("?not reported");
+      expect(cellText(r, 2)).toBe("unknown");
+    });
+  });
+
+  describe("resident for", () => {
+    const notResident = rerankerMetrics.replace(
+      /^(dita_worker_model_resident\{[^}]*\}) 1$/m,
+      "$1 0",
+    );
+    it.each([
+      ["a resident model", "ready", rerankerMetrics, "1 h 12 min"],
+      ["a worker whose gauge says nothing is resident", "no_model", notResident, "—"],
+    ])("%s", async (_, state, page, want) => {
+      expect(notResident).not.toBe(rerankerMetrics);
+      stubApi({
+        "GET /workers": () => ({
+          status: 200,
+          body: { workers: [report("inferences-reranker", state)] },
+        }),
+        "GET /metrics/reranker": () => ({ status: 200, body: page }),
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-reranker");
+      await vi.waitFor(() => {
+        expect(cellText(r, 3)).toBe(want);
+      });
+      if (want === "—") {
+        expect(document.body.textContent).not.toContain("0.0 s");
+      }
+    });
+  });
+
+  it("lists a worker it does not know after the intended fleet, as reported by the gateway", async () => {
+    fleet(report("inferences-embedding", "ready"), report("inferences-extra", "ready"));
+    renderAt("/", "/", <FleetPage />);
+    const r = await row("inferences-extra");
+    expect(within(r).getByText("reported by the gateway")).toBeTruthy();
+    expect(within(r).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("explains the not-deployed rows only while the gateway does not report them", async () => {
+    const note =
+      /OCR speaks only DIP, which the gateway does not probe, and STT and TTS have no code yet/;
+    fleet(report("inferences-embedding", "ready"));
+    const first = renderAt("/", "/", <FleetPage />);
+    await row("inferences-embedding");
+    expect(screen.getByText(note)).toBeTruthy();
+    first.unmount();
+
+    fleet(report("inferences-embedding", "ready"), report("inferences-ocr", "ready"));
+    renderAt("/", "/", <FleetPage />);
+    await row("inferences-ocr");
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
+  it("announces the paused and failed notes, never the clock", async () => {
+    fleet(report("inferences-embedding", "ready"));
+    renderAt("/", "/", <FleetPage />);
+    const time = await screen.findByText(/^\d\d:\d\d:\d\d$/, { selector: "time" });
+    expect(time.closest("[aria-live], [role=status]")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
   describe("polling", () => {
     let visibility: DocumentVisibilityState = "visible";
     beforeEach(() => {
@@ -120,6 +239,44 @@ describe("FleetPage", () => {
       });
     };
     const polls = (calls: { path: string }[]) => calls.filter((c) => c.path === "/workers").length;
+
+    it("marks every reported row stale when the latest refresh failed, and keeps the last values", async () => {
+      let failing = false;
+      stubApi({
+        "GET /workers": () =>
+          failing
+            ? { status: 502, body: { error: "the gateway is down" } }
+            : {
+                status: 200,
+                body: {
+                  workers: [
+                    report("inferences-embedding", "ready", {
+                      info: { model_id: "qwen3-embedding-0.6b" },
+                    }),
+                  ],
+                },
+              },
+      });
+      renderAt("/", "/", <FleetPage />);
+      const r = await row("inferences-embedding");
+      const badge = () =>
+        within(r).getByText("ready", { exact: false, selector: "span[data-tone]" });
+      expect(badge().dataset.stale).toBeUndefined();
+      expect(badge().textContent).toBe("●ready");
+      expect(within(r).queryByText(/^stale: not refreshed since/)).toBeNull();
+      expect(screen.getByRole("status").textContent).toBe("");
+
+      failing = true;
+      await act(() => vi.advanceTimersByTimeAsync(12_000));
+      expect(screen.getByRole("status").textContent).toBe(
+        " · the latest refresh failed; this is the last good answer",
+      );
+      expect(badge().dataset.stale).toBe("true");
+      expect(badge().textContent).toBe("●ready · stale");
+      expect(badge().className).not.toMatch(/emerald/);
+      expect(within(r).getByText(/^stale: not refreshed since \d\d:\d\d:\d\d$/)).toBeTruthy();
+      expect(within(r).getByText("qwen3-embedding-0.6b")).toBeTruthy();
+    });
 
     it("polls every 5 s while visible, stops while hidden, and says it is paused", async () => {
       const calls = fleet(report("inferences-embedding", "ready"));

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Bins is the number of equal-width confidence bins behind ECE.
@@ -12,6 +14,10 @@ const Bins = 10
 
 // MaxRows bounds one evaluation upload.
 const MaxRows = 10000
+
+// MaxEvaluationName bounds a run's name; the name and the class keys are the only uploaded
+// text an evaluation stores.
+const MaxEvaluationName = 200
 
 // Row is one labelled example: the true label and the model's probability per option.
 type Row struct {
@@ -54,6 +60,9 @@ type Evaluation struct {
 // Evaluate scores rows. Every row must score the same options, and its label must be one of
 // them; probabilities must lie in [0, 1] and sum to 1 within 0.02.
 func Evaluate(name string, rows []Row) (Evaluation, error) {
+	if strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > MaxEvaluationName {
+		return Evaluation{}, fmt.Errorf("%w: the name is 1-%d characters and not blank", ErrInvalid, MaxEvaluationName)
+	}
 	if len(rows) == 0 || len(rows) > MaxRows {
 		return Evaluation{}, fmt.Errorf("%w: between 1 and %d rows", ErrInvalid, MaxRows)
 	}
@@ -67,6 +76,9 @@ func Evaluate(name string, rows []Row) (Evaluation, error) {
 	}
 	index := map[string]int{}
 	for i, c := range classes {
+		if strings.TrimSpace(c) == "" || utf8.RuneCountInString(c) > MaxOptionLen {
+			return Evaluation{}, fmt.Errorf("%w: a class is 1-%d characters and not blank", ErrInvalid, MaxOptionLen)
+		}
 		index[c] = i
 	}
 	support := make([]int, len(classes))

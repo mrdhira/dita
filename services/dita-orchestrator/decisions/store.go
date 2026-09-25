@@ -2,6 +2,7 @@ package decisions
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -16,7 +17,9 @@ import (
 )
 
 // FormatMarker names the on-disk layout. Opening an empty directory writes it; opening a
-// directory marked with anything else is refused rather than guessed at.
+// directory marked with anything else is refused rather than guessed at. retirements.jsonl
+// arrived without a new marker: it only adds, and a build that predates it ignores it, so a
+// rollback makes retired versions selectable again rather than refusing the store.
 const FormatMarker = "dita-decisions/1\n"
 
 // Errors a caller branches on.
@@ -24,10 +27,33 @@ var (
 	ErrNotFound         = errors.New("not found")
 	ErrAlreadyCorrected = errors.New("a correction is already recorded for this prediction; the first stands")
 	ErrInvalid          = errors.New("invalid")
+	ErrUnreadable       = errors.New("unreadable")
 )
 
+// Retirement withdraws one template version from new decisions. The version itself, and every
+// prediction made under it, is untouched.
+type Retirement struct {
+	Name      string    `json:"name"`
+	Version   int       `json:"version"`
+	RetiredAt time.Time `json:"retired_at"`
+}
+
+// Version is a template as listed, with the server's one verdict on it. Usable and Faults are
+// CheckQuestions, the rules Decide applies: what the list promises is what a decision does.
+// AuthoringIssues are ValidateDraft's, for the editor only: a template saved before an authoring
+// rule existed breaks it and still runs.
+type Version struct {
+	Template
+	Retired         bool    `json:"retired"`
+	Usable          bool    `json:"usable"`
+	Faults          []Issue `json:"faults"`
+	AuthoringIssues []Issue `json:"authoring_issues"`
+}
+
 // Prediction is one recommendation, written once. `Prediction` is the worker's answer as
-// returned and `Confidence` its confidence as returned; neither is recomputed.
+// returned and `Confidence` its confidence as returned; neither is recomputed. `Answers` is that
+// answer as ParseReply read it at write time, so a later, stricter ParseReply cannot empty
+// history; a record written before the field has none and is read under today's rules.
 type Prediction struct {
 	ID            string             `json:"id"`
 	CreatedAt     time.Time          `json:"created_at"`
@@ -38,6 +64,7 @@ type Prediction struct {
 	ModelRevision string             `json:"model_revision"`
 	Prediction    json.RawMessage    `json:"prediction"`
 	Confidence    map[string]float64 `json:"confidence"`
+	Answers       []Answer           `json:"answers,omitempty"`
 }
 
 // Correction is the human's answer to a prediction: a second, separate write, never merged
@@ -49,20 +76,39 @@ type Correction struct {
 	Outcomes     map[string]string `json:"outcomes"`
 }
 
+// MaxRecord bounds one stored line, newline included. The reader cannot read a longer one back,
+// so the writer refuses to write it: a record Open would refuse must never reach the disk.
+const MaxRecord = 16 << 20
+
+// ErrPoisoned is returned by every write after an append failed and could not be undone.
+var ErrPoisoned = errors.New("the store stopped taking writes: a failed append could not be rolled back; restart to re-read it")
+
+// appendFile is what append needs of a file; *os.File has it, and a test substitutes a failing one.
+type appendFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Truncate(int64) error
+	Stat() (os.FileInfo, error)
+	Close() error
+}
+
 // Store is the append-only store. Every write is one JSON line, appended and synced before
-// memory changes, so what a reader sees is always on disk. One process owns a directory.
+// memory changes, so what a reader sees is always on disk. The sync is not asserted by any
+// test: its absence is only observable across a power loss. One process owns a directory.
 type Store struct {
 	mu          sync.Mutex
 	dir         string
 	now         func() time.Time
+	open        func(path string) (appendFile, error)
+	poisoned    error
 	templates   map[string][]Template
 	predictions map[string]Prediction
 	order       []string
 	corrections map[string]Correction
 	evaluations []Evaluation
+	retirements map[string]Retirement
+	rejected    []Rejection
 }
-
-var files = []string{"templates.jsonl", "predictions.jsonl", "corrections.jsonl", "evaluations.jsonl"}
 
 // Open reads every record under dir into memory, creating the layout in an empty directory.
 // A line that does not parse, or a second correction for one prediction, is an error: the
@@ -82,24 +128,35 @@ func Open(dir string) (*Store, error) {
 	case string(got) != FormatMarker:
 		return nil, fmt.Errorf("%s says %q, this build reads %q", marker, strings.TrimSpace(string(got)), strings.TrimSpace(FormatMarker))
 	}
-	s := &Store{dir: dir, now: time.Now, templates: map[string][]Template{},
-		predictions: map[string]Prediction{}, corrections: map[string]Correction{}}
+	s := &Store{dir: dir, now: time.Now, open: openAppend, templates: map[string][]Template{},
+		predictions: map[string]Prediction{}, corrections: map[string]Correction{}, retirements: map[string]Retirement{}}
 	if err := s.replay(); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
+// replay reads every file. templates.jsonl, and the retirements that act on it, are fatal: a
+// template silently misread becomes the rules the whole history is read under, and the file is
+// tiny and written a handful of times in its life, so correctness beats availability there and a
+// human repairs it. Predictions, corrections and evaluations are quarantined instead
+// (quarantine.go): availability beats correctness where the volume and the uploads are, and a
+// dropped line costs one record, reported on /stats and in the log.
 func (s *Store) replay() error {
+	if err := readLines(s.dir, "templates.jsonl", func(t Template) error {
+		if t.Version != len(s.templates[t.Name])+1 {
+			return fmt.Errorf("template %s version %d out of sequence", t.Name, t.Version)
+		}
+		s.templates[t.Name] = append(s.templates[t.Name], t)
+		return nil
+	}); err != nil {
+		return err
+	}
 	return errors.Join(
-		readLines(s.dir, "templates.jsonl", func(t Template) error {
-			if t.Version != len(s.templates[t.Name])+1 {
-				return fmt.Errorf("template %s version %d out of sequence", t.Name, t.Version)
+		readQuarantined(s, "predictions.jsonl", func(p Prediction) error {
+			if p.SchemaVersion < 1 || p.SchemaVersion > len(s.templates[p.SchemaID]) {
+				return fmt.Errorf("prediction %s names template %s version %d, which was never written", p.ID, p.SchemaID, p.SchemaVersion)
 			}
-			s.templates[t.Name] = append(s.templates[t.Name], t)
-			return nil
-		}),
-		readLines(s.dir, "predictions.jsonl", func(p Prediction) error {
 			if _, dup := s.predictions[p.ID]; dup {
 				return fmt.Errorf("prediction %s written twice", p.ID)
 			}
@@ -107,15 +164,29 @@ func (s *Store) replay() error {
 			s.order = append(s.order, p.ID)
 			return nil
 		}),
-		readLines(s.dir, "corrections.jsonl", func(c Correction) error {
+		readQuarantined(s, "corrections.jsonl", func(c Correction) error {
+			if _, ok := s.predictions[c.PredictionID]; !ok {
+				return fmt.Errorf("a correction for prediction %s, which was never written", c.PredictionID)
+			}
 			if _, dup := s.corrections[c.PredictionID]; dup {
 				return fmt.Errorf("prediction %s corrected twice", c.PredictionID)
 			}
 			s.corrections[c.PredictionID] = c
 			return nil
 		}),
-		readLines(s.dir, "evaluations.jsonl", func(e Evaluation) error {
+		readQuarantined(s, "evaluations.jsonl", func(e Evaluation) error {
 			s.evaluations = append(s.evaluations, e)
+			return nil
+		}),
+		readLines(s.dir, "retirements.jsonl", func(r Retirement) error {
+			if r.Version < 1 || r.Version > len(s.templates[r.Name]) {
+				return fmt.Errorf("template %s version %d is retired but was never written", r.Name, r.Version)
+			}
+			key := versionKey(r.Name, r.Version)
+			if _, dup := s.retirements[key]; dup {
+				return fmt.Errorf("template %s version %d retired twice", r.Name, r.Version)
+			}
+			s.retirements[key] = r
 			return nil
 		}),
 	)
@@ -131,7 +202,7 @@ func readLines[T any](dir, name string, apply func(T) error) error {
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<20), 16<<20)
+	scanner.Buffer(make([]byte, 1<<20), MaxRecord)
 	for line := 1; scanner.Scan(); line++ {
 		var record T
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
@@ -144,23 +215,57 @@ func readLines[T any](dir, name string, apply func(T) error) error {
 	return scanner.Err()
 }
 
+func openAppend(path string) (appendFile, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o640)
+}
+
+// encode is one record as its stored line. HTML is not escaped: `<` would otherwise cost six
+// bytes on disk, and a line is bounded.
+func encode(record any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(record); err != nil {
+		return nil, err
+	}
+	if b.Len() > MaxRecord {
+		return nil, fmt.Errorf("%w: the record is %d bytes, a stored line is at most %d", ErrInvalid, b.Len(), MaxRecord)
+	}
+	return b.Bytes(), nil
+}
+
+// append writes one line and syncs it. A write or sync that fails is cut back to the size the
+// file had, so the next line never lands after a fragment; if that fails too, the store is
+// poisoned and refuses every later write until a restart re-reads what is on disk.
 func (s *Store) append(name string, record any) error {
-	line, err := json.Marshal(record)
+	if s.poisoned != nil {
+		return s.poisoned
+	}
+	line, err := encode(record)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, name), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o640)
+	f, err := s.open(filepath.Join(s.dir, name))
 	if err != nil {
 		return fmt.Errorf("open %s: %w", name, err)
 	}
 	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("append %s: %w", name, err)
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", name, err)
 	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync %s: %w", name, err)
+	_, err = f.Write(line)
+	if err == nil {
+		err = f.Sync()
 	}
-	return nil
+	if err == nil {
+		return nil
+	}
+	if terr := f.Truncate(info.Size()); terr != nil {
+		s.poisoned = fmt.Errorf("%w (%s: %v, then truncate: %v)", ErrPoisoned, name, err, terr)
+		return s.poisoned
+	}
+	return fmt.Errorf("append %s: %w", name, err)
 }
 
 // SaveTemplate writes a new version of a template; an existing version is never touched.
@@ -179,39 +284,79 @@ func (s *Store) SaveTemplate(d Draft) (Template, error) {
 	return t, nil
 }
 
-// Templates returns the latest version of every template, by name.
-func (s *Store) Templates() []Template {
+// Templates returns the latest version of every template, by name, retired or not.
+func (s *Store) Templates() []Version {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Template, 0, len(s.templates))
+	out := make([]Version, 0, len(s.templates))
 	for _, versions := range s.templates {
-		out = append(out, versions[len(versions)-1])
+		out = append(out, s.version(versions[len(versions)-1]))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
 // Versions returns every version of one template, oldest first.
-func (s *Store) Versions(name string) ([]Template, error) {
+func (s *Store) Versions(name string) ([]Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	versions, ok := s.templates[name]
 	if !ok {
 		return nil, ErrNotFound
 	}
-	return append([]Template(nil), versions...), nil
+	out := make([]Version, len(versions))
+	for i, t := range versions {
+		out[i] = s.version(t)
+	}
+	return out, nil
 }
 
 // Template returns one version of one template.
-func (s *Store) Template(name string, version int) (Template, error) {
+func (s *Store) Template(name string, version int) (Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	versions := s.templates[name]
 	if version < 1 || version > len(versions) {
-		return Template{}, ErrNotFound
+		return Version{}, ErrNotFound
 	}
-	return versions[version-1], nil
+	return s.version(versions[version-1]), nil
 }
+
+// Retire withdraws a version from new decisions, once: retiring it again returns the first
+// retirement and writes nothing.
+func (s *Store) Retire(name string, version int) (Retirement, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if version < 1 || version > len(s.templates[name]) {
+		return Retirement{}, ErrNotFound
+	}
+	key := versionKey(name, version)
+	if r, done := s.retirements[key]; done {
+		return r, nil
+	}
+	r := Retirement{Name: name, Version: version, RetiredAt: s.now().UTC()}
+	if err := s.append("retirements.jsonl", r); err != nil {
+		return Retirement{}, err
+	}
+	s.retirements[key] = r
+	return r, nil
+}
+
+func (s *Store) version(t Template) Version {
+	_, retired := s.retirements[versionKey(t.Name, t.Version)]
+	faults := CheckQuestions(t.Questions)
+	return Version{Template: t, Retired: retired, Usable: len(faults) == 0, Faults: nonNil(faults),
+		AuthoringIssues: nonNil(ValidateDraft(Draft{Name: t.Name, Description: t.Description, Questions: t.Questions}))}
+}
+
+func nonNil(issues []Issue) []Issue {
+	if issues == nil {
+		return []Issue{}
+	}
+	return issues
+}
+
+func versionKey(name string, version int) string { return fmt.Sprintf("%s@%d", name, version) }
 
 // AddPrediction writes a prediction. It is called only after the worker answered.
 func (s *Store) AddPrediction(t Template, text string, raw []byte, reply Reply) (Prediction, error) {
@@ -221,7 +366,7 @@ func (s *Store) AddPrediction(t Template, text string, raw []byte, reply Reply) 
 	}
 	p := Prediction{ID: id, SchemaID: t.Name, SchemaVersion: t.Version, InputText: text,
 		ModelID: reply.ModelID, ModelRevision: reply.ModelRevision, Prediction: json.RawMessage(raw),
-		Confidence: reply.Confidence}
+		Confidence: reply.Confidence, Answers: reply.Answers}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p.CreatedAt = s.now().UTC()
@@ -250,12 +395,12 @@ func (s *Store) Correct(id string, answers map[string]string) (Correction, error
 		return Correction{}, ErrAlreadyCorrected
 	}
 	t := s.templates[p.SchemaID][p.SchemaVersion-1]
-	reply, err := ParseReply(p.Prediction, t.Questions)
+	stored, _, err := ReadAnswers(p, t)
 	if err != nil {
-		return Correction{}, fmt.Errorf("prediction %s no longer parses: %w", id, err)
+		return Correction{}, err
 	}
 	top := map[string]string{}
-	for _, a := range reply.Answers {
+	for _, a := range stored {
 		top[a.Question] = a.Options[0].Option
 	}
 	if len(answers) != len(t.Questions) {
@@ -278,6 +423,20 @@ func (s *Store) Correct(id string, answers map[string]string) (Correction, error
 	}
 	s.corrections[id] = c
 	return c, nil
+}
+
+// ReadAnswers is a prediction's answers: as stored at write time, or, for a record older than
+// that field, parsed now under today's rules, which reparsed reports. An answer today's rules
+// refuse is ErrUnreadable, never an empty list.
+func ReadAnswers(p Prediction, t Template) (answers []Answer, reparsed bool, err error) {
+	if p.Answers != nil {
+		return p.Answers, false, nil
+	}
+	reply, err := ParseReply(p.Prediction, t.Questions)
+	if err != nil {
+		return nil, true, fmt.Errorf("%w: prediction %s was stored before answers were kept, and today's rules refuse it: %v", ErrUnreadable, p.ID, err)
+	}
+	return reply.Answers, true, nil
 }
 
 // Get returns a prediction and its correction, if one was recorded.
@@ -343,8 +502,8 @@ type Tally struct {
 	Version     int     `json:"version"`
 	Predictions int     `json:"predictions"`
 	Corrected   int     `json:"corrected"`
-	Accepted    int     `json:"answers_accepted"`
-	Changed     int     `json:"answers_corrected"`
+	Accepted    int     `json:"storedaccepted"`
+	Changed     int     `json:"storedcorrected"`
 	Rate        float64 `json:"correction_rate"`
 }
 
@@ -356,7 +515,7 @@ func (s *Store) Tallies() []Tally {
 	var keys []string
 	for _, id := range s.order {
 		p := s.predictions[id]
-		key := fmt.Sprintf("%s@%d", p.SchemaID, p.SchemaVersion)
+		key := versionKey(p.SchemaID, p.SchemaVersion)
 		t, ok := by[key]
 		if !ok {
 			t = &Tally{Schema: p.SchemaID, Version: p.SchemaVersion}

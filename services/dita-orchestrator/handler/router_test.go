@@ -61,6 +61,11 @@ func TestTheGatewayIsMountedUnderOnePrefix(t *testing.T) {
 		}
 	}
 	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/inferences/metrics/system-one", nil))
+	if rec.Code != 200 || rec.Body.String() != "GET /metrics" {
+		t.Fatalf("GET metrics: %d %q, want the worker to see GET /metrics", rec.Code, rec.Body)
+	}
+	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/api/inferences/embed", nil))
 	if rec.Code == 200 {
 		t.Fatal("GET /api/inferences/embed was proxied; only POST should be")
@@ -212,6 +217,7 @@ func TestTheRoutersOwnRefusalsAnswerInTheOneErrorShape(t *testing.T) {
 	}{
 		{"no route", "GET", "/api/inferences/nope", 404, "NotFound", "no route for GET /api/inferences/nope"},
 		{"a route, another method", "GET", "/api/inferences/embed", 405, "MethodNotAllowed", "GET is not served on /api/inferences/embed; allowed: POST"},
+		{"metrics are read-only", "POST", "/api/inferences/metrics/embedding", 405, "MethodNotAllowed", "POST is not served on /api/inferences/metrics/embedding; allowed: GET, HEAD"},
 		{"a handler's own 404 passes through", "GET", "/api/inferences/decisions/nope", 404, "NotFound", "not found"},
 	}
 	for _, c := range cases {
@@ -229,6 +235,9 @@ func TestTheRoutersOwnRefusalsAnswerInTheOneErrorShape(t *testing.T) {
 	}
 	if rec := call("GET", "/api/inferences/embed", "", nil); rec.Header().Get("Allow") != "POST" {
 		t.Fatalf("a 405 lost its Allow header: %v", rec.Header())
+	}
+	if rec := call("POST", "/api/inferences/metrics/embedding", "{}", map[string]string{"Content-Type": jsonType}); rec.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("POST metrics: Allow %q, want GET only (HEAD is implied by GET)", rec.Header().Get("Allow"))
 	}
 }
 

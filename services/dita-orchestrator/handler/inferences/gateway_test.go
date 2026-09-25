@@ -82,6 +82,7 @@ func gatewayFor(t *testing.T, timeout time.Duration, workers map[string]*url.URL
 	mux.HandleFunc("POST /api/inferences/decide", g.Decide)
 	mux.HandleFunc("GET /api/inferences/workers", g.Workers)
 	mux.HandleFunc("GET /api/inferences/health", g.Health)
+	mux.HandleFunc("GET /api/inferences/metrics/{service}", g.Metrics)
 	return mux
 }
 
@@ -464,5 +465,66 @@ func TestABodyWithoutALengthIsBufferedOnlyUpToTheCap(t *testing.T) {
 				t.Fatalf("%d bytes without a length: %d, worker reached %v", c.size, rec.Code, reached)
 			}
 		})
+	}
+}
+
+func TestMetricsPassesTheWorkersPageThroughVerbatim(t *testing.T) {
+	page := []byte("# HELP dita_worker_ops_total DIP requests handled.\n# TYPE dita_worker_ops_total counter\n" +
+		"dita_worker_ops_total{worker=\"inferences-reranker\",op=\"infer\",outcome=\"ok\"} 24\n" +
+		"dita_worker_infer_duration_seconds_bucket{le=\"+Inf\"}   24\n")
+	cases := []struct{ service, worker string }{
+		{"embedding", Embedding},
+		{"reranker", Reranker},
+		{"system-one", SystemOne},
+	}
+	for _, c := range cases {
+		t.Run(c.service, func(t *testing.T) {
+			up := &upstream{status: 200, response: page, headers: map[string]string{"Content-Type": "text/plain"}}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{c.worker: start(t, up)})
+
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/"+c.service+"?path=/info", nil)
+
+			if rec.Code != 200 || !bytes.Equal(rec.Body.Bytes(), page) {
+				t.Fatalf("got %d %q, want the worker's bytes %q", rec.Code, rec.Body.Bytes(), page)
+			}
+			if got := rec.Header().Get("Content-Type"); got != MetricsContentType {
+				t.Fatalf("content type %q, want %q", got, MetricsContentType)
+			}
+			if up.path != "/metrics" {
+				t.Fatalf("the worker was asked for %q; only /metrics is reachable", up.path)
+			}
+		})
+	}
+}
+
+func TestMetricsForAServiceItDoesNotKnowIsTheOneErrorShape(t *testing.T) {
+	up := &upstream{status: 200, response: []byte("x 1\n")}
+	u := start(t, up)
+	gw := gatewayFor(t, time.Minute, map[string]*url.URL{Embedding: u, Reranker: u, SystemOne: u})
+	for _, service := range []string{"ocr", "inferences-embedding", "embed", "%2e%2e%2finfo"} {
+		t.Run(service, func(t *testing.T) {
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/"+service, nil)
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 404 ||
+				body["error_type"] != "NotFound" || body["error"] == "" || len(body) != 2 {
+				t.Fatalf("got %d %q (%v), want 404 {error, error_type: NotFound}", rec.Code, rec.Body, err)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("content type %q", got)
+			}
+		})
+	}
+	if up.path != "" {
+		t.Fatalf("an unknown service reached a worker at %q", up.path)
+	}
+}
+
+func TestMetricsFromAWorkerThatIsDown(t *testing.T) {
+	gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: closedURL(t)})
+	rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+	var got failure
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 503 ||
+		got.Reason != "not_running" || got.ErrorType != "Unhealthy" || got.Worker != Reranker {
+		t.Fatalf("got %d %q (%v), want 503 not_running", rec.Code, rec.Body, err)
 	}
 }

@@ -19,6 +19,17 @@ describe("the template editor's resolver", () => {
     expect(toDraft(fromDraft(toDraft(form)))).toEqual(toDraft(form));
   });
 
+  it("carries criteria through the editor, since the model reads it as the instructions", () => {
+    const criteria = "How severe is this homelab alert?";
+    const draft = {
+      name: "alert-triage",
+      description: "",
+      questions: [{ name: "severity", type: "choice", options: ["info", "warning"], criteria }],
+    };
+    expect(toDraft(fromDraft(draft)).questions[0]?.criteria).toBe(criteria);
+    expect(toDraft(fromDraft(toDraft(form))).questions[0]).not.toHaveProperty("criteria");
+  });
+
   it("puts an option fault on the options field and a range fault on min", async () => {
     const [question] = form.questions;
     if (!question) throw new Error("the fixture has a question");

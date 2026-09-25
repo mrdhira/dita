@@ -1,4 +1,4 @@
-$ playwright test --workers=1
+$ playwright test --workers=1        # default mode: the documented stub worker
 
 Running 3 tests using 1 worker
 
@@ -7,3 +7,22 @@ Running 3 tests using 1 worker
   ✓  3 [chromium] › e2e/decide.spec.ts:155:1 › a correction is refused on screen when the prediction is already corrected elsewhere (471ms)
 
   3 passed (3.3s)
+
+
+$ E2E_SYSTEM_ONE_URL=http://127.0.0.1:18801 make e2e        # the real worker
+
+Running 3 tests using 1 worker
+
+  ✓  1 [chromium] › e2e/decide.spec.ts:57:1 › paste, decide, correct, reload: the correction is still attached (2.2s)
+  ✓  2 [chromium] › e2e/decide.spec.ts:191:1 › the eval panel puts the model beside the majority-class baseline (391ms)
+  ✓  3 [chromium] › e2e/decide.spec.ts:213:1 › a correction is refused on screen when the prediction is already corrected elsewhere (833ms)
+
+  3 passed (5.9s)
+
+No stub started in the second run, and no stub label appears anywhere in its output: the answers
+on screen carry model_id `laya-multilingual` and revision `b4a904d1a2a54c822b829e24291d4b8f280fe43e`,
+which is what services/inferences-system-one/models.yaml pins.
+
+The worker publishes no host port, as every inferences service does; the URL above is a loopback
+publish used for this run only (`docker run -p 127.0.0.1:18801:8080`). In the deployment the run
+names the worker's address on the `proxy` network instead, as the requirement doc records.

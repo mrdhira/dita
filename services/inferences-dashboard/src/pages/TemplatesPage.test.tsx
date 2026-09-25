@@ -57,4 +57,26 @@ describe("TemplatesPage", () => {
     });
     expect(options.value).toBe("low\nhigh");
   });
+
+  it("keeps a loaded template's criteria when it is saved as the next version", async () => {
+    const criteria = "How severe is this homelab alert?";
+    const withCriteria = {
+      ...saved,
+      questions: [{ name: "severity", type: "choice", options: ["low", "high"], criteria }],
+    };
+    const calls = stubApi({
+      "GET /schemas": () => ({ status: 200, body: { templates: [withCriteria] } }),
+      "POST /schemas": () => ({ status: 201, body: { ...withCriteria, version: 2 } }),
+    });
+    renderAt("/templates", "/templates", <TemplatesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "alert-triage v1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save as a new version" }));
+
+    expect(await screen.findByText("alert-triage v2 saved")).toBeTruthy();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      name: "alert-triage",
+      description: "",
+      questions: [{ name: "severity", type: "choice", options: ["low", "high"], criteria }],
+    });
+  });
 });

@@ -2,10 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { STUB_URL, realWorkerUrl } from "./e2e/worker";
 
-// The whole path, real except the worker: Caddy with the production headers serving dist/,
-// the orchestrator binary over a fresh store, and the labelled stub in place of
-// inferences-system-one, which is not merged. Everything binds 127.0.0.1.
+// The whole path: Caddy with the production headers serving dist/, the orchestrator binary
+// over a fresh store, and the labelled stub in place of inferences-system-one, unless
+// E2E_SYSTEM_ONE_URL names a real worker. Everything else binds 127.0.0.1.
 const store = mkdtempSync(join(tmpdir(), "dita-e2e-store-"));
 const origin = "https://localhost:8443";
 
@@ -23,11 +24,15 @@ export default defineConfig({
     },
   ],
   webServer: [
-    {
-      command: "node e2e/stub-system-one.mjs",
-      url: "http://127.0.0.1:18801/health",
-      reuseExistingServer: false,
-    },
+    ...(realWorkerUrl
+      ? []
+      : [
+          {
+            command: "node e2e/stub-system-one.mjs",
+            url: `${STUB_URL}/health`,
+            reuseExistingServer: false,
+          },
+        ]),
     {
       command: "../dita-orchestrator/bin/dita-orchestrator serveRest",
       url: "http://127.0.0.1:12104/api/inferences/health",
@@ -35,7 +40,7 @@ export default defineConfig({
       env: {
         REST_ADDR: "127.0.0.1:12104",
         DECISIONS_DIR: store,
-        INFERENCES_SYSTEM_ONE_URL: "http://127.0.0.1:18801",
+        INFERENCES_SYSTEM_ONE_URL: realWorkerUrl ?? STUB_URL,
         INFERENCES_EMBEDDING_URL: "http://127.0.0.1:1",
         INFERENCES_RERANKER_URL: "http://127.0.0.1:1",
         DEEPSEEK_API_KEY: "placeholder-e2e-no-chat",

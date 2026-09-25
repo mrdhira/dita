@@ -65,3 +65,15 @@ describe("the eval upload", () => {
     ).toBeTruthy();
   });
 });
+
+describe("the calibration panel", () => {
+  it("says the temperatures are the identity rather than implying a fitted calibration", () => {
+    stubApi({ "GET /evaluations": () => ({ status: 200, body: { evaluations: [] } }) });
+    renderAt("/eval", "/eval", <EvalPage />);
+    const panel = screen.getByRole("region", { name: "calibration" });
+    expect(panel.querySelector("h2")?.textContent).toBe("Calibration: none fitted");
+    expect(screen.getByTestId("calibration").textContent).toMatch(
+      /Every temperature in the checkpoint is 1\.0, so temperature scaling is the identity\s+transform/,
+    );
+  });
+});

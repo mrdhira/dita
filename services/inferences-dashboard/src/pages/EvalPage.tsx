@@ -85,6 +85,27 @@ export function EvaluationResult({ result }: { result: Evaluation }) {
   );
 }
 
+/**
+ * States what the worker applies, which is nothing: the checkpoint ships every temperature at
+ * 1.0 and nothing has been fitted, since there are no labels yet. Change this text only when a
+ * fitted checkpoint lands.
+ */
+export function CalibrationPanel() {
+  return (
+    <section
+      aria-label="calibration"
+      className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"
+    >
+      <h2 className="font-semibold">Calibration: none fitted</h2>
+      <p data-testid="calibration">
+        Every temperature in the checkpoint is 1.0, so temperature scaling is the identity
+        transform: the probabilities shown are the model&apos;s raw softmax, uncalibrated. The ECE
+        below measures that uncalibrated output.
+      </p>
+    </section>
+  );
+}
+
 export function EvalPage() {
   const client = useQueryClient();
   const history = useQuery({ queryKey: ["evaluations"], queryFn: api.evaluations });
@@ -99,6 +120,7 @@ export function EvalPage() {
 
   return (
     <div className="space-y-6">
+      <CalibrationPanel />
       <form aria-label="evaluate a labelled set" className="space-y-2">
         <label className="block text-sm font-medium">
           Labelled CSV: a <code>label</code> column and one <code>p:&lt;option&gt;</code> column per

@@ -71,8 +71,10 @@ from the dashboard.
 The requirement's three stores, kept deliberately different.
 
 **1. Schema templates** — `templates.jsonl`, one line per version. A draft is `{name, description,
-questions[]}`; a question is `{name, type: noul | choice | score, options[2..20], range?}`. The version is
-assigned by the store and is the next integer; there is no update path.
+questions[]}`; a question is `{name, type: noul | choice | score, options[2..20], criteria, range?}`. The
+version is assigned by the store and is the next integer; there is no update path. A version is withdrawn from
+new decisions by a line in `retirements.jsonl` (`{name, version, retired_at}`, once per version), never by
+touching `templates.jsonl`; every listed template carries `retired`.
 
 **2. Prediction + correction** — two files, two writes, never merged:
 
@@ -85,6 +87,7 @@ assigned by the store and is the next integer; there is no update path.
 | `model_id`, `model_revision` | prediction | as the worker reported them |
 | `prediction` | prediction | the worker's answer **as returned** (content; JSON whitespace compacted) |
 | `confidence` | prediction | per question, as returned, never recomputed |
+| `answers` | prediction | the reply as `ParseReply` read it **at write time**; see "History is read under the rules it was written under" |
 | `corrected_at` | correction | the second write |
 | `correction` (`answers`) | correction | the human's answer per question, a **separate record** |
 | `outcomes` | correction | `accepted` / `corrected` per question, derived by the store from the stored prediction, never taken from the caller |
@@ -96,8 +99,11 @@ predictions, corrected, answers accepted and answers corrected. In memory and de
 **Why files, not a database.** CGO-free and stdlib-only was the constraint, one orchestrator owns the store,
 and append-only is a property a file with `O_APPEND` and an fsync per line holds by construction. A store
 directory carries a `FORMAT` marker (`dita-decisions/1`, the "migration"): an empty directory is initialised,
-a different marker is refused. On start every line is replayed; a line that does not parse, a template version
-out of sequence, or one prediction corrected twice **stops the orchestrator** rather than being repaired.
+a different marker is refused. On start every line is replayed; in the rules files (templates, retirements) a line that does not parse,
+a template version out of sequence, or a retirement of a version never written or retired twice **stops the
+orchestrator** rather than being repaired. Record files are quarantined instead; see "A damaged record costs
+that record". `retirements.jsonl` arrived under the same marker: it
+only adds, and a build that predates it ignores it, so a rollback makes retired versions selectable again.
 
 ### The worker contract (stub-defined)
 
@@ -122,7 +128,8 @@ confidence}]`, so when the real worker lands only the adapter changes.
 | route | purpose |
 | --- | --- |
 | `GET /schemas` · `POST /schemas` | latest version of each template · save a new version |
-| `GET /schemas/{name}/versions[/{v}]` | every version · one version |
+| `GET /schemas/{name}/versions[/{v}]` | every version · one version, each with `retired` |
+| `POST /schemas/{name}/versions/{v}/retire` | → `200 {name, version, retired: true, retired_at}`; retiring again returns the first |
 | `POST /decisions` | `{text, schema:{name, version}}` → ask the worker, then write the prediction |
 | `GET /decisions?limit=N` · `GET /decisions/{id}` | recent, newest first · one, with its correction |
 | `POST /decisions/{id}/correction` | `{answers:{question: option}}` → 201 once; **409** the second time |
@@ -141,7 +148,7 @@ write is retried at all** (a retried decide would be a second prediction).
 ### Validation, once in each language, proven equal
 
 The rules exist twice by necessity — the client for UX, the server because a hand-rolled request must not
-bypass them. `specs/decisions/schema-cases.json` holds 26 cases (valid templates at every limit, each rule
+bypass them. `specs/decisions/schema-cases.json` holds 41 template cases and 7 text cases (valid templates at every limit, each rule
 broken alone, several broken at once) with the exact issue paths expected. The Go suite and the zod suite
 both run the file; a rule that drifts in either fails its suite. The zod schema keeps its rules in one
 `superRefine` over loosely-typed fields, because zod 4 skips later refinements after a failed field check and
@@ -151,10 +158,54 @@ A `noul` question's options are exactly `false` and `true`, in either order: the
 those keys and refuses one asked with any others, so a `yes`/`no` template would save and then fail at every
 `/decide`. `ValidateDraft`, zod and `schema-cases.json` all carry the rule.
 
-A question may carry `criteria`, an optional string with no further rule on either side (Go's
-`json:"criteria,omitempty"`). It is what the model reads as the question's instructions; without it the model
-sees only the question's name, and the answer moves materially (measured through the orchestrator: `warning`
-0.8507 with criteria, 0.6396 without). The editor has **no input for it yet**: loading a template and saving
+**Status codes added by the hardening change.** Every `POST` answers `403` (`Forbidden`) when the browser marks it
+`Sec-Fetch-Site: cross-site`, `415` (`Validation`) without `Content-Type: application/json`, and `401`
+(`Unauthorized`) without the token when `INFERENCES_API_TOKEN` is set (gateway doc, "Writes"). A decision on a
+retired version is `410` (`Retired`), naming it. A decision on a version the list marks `usable: false` is
+`400` (`Validation`) with its `faults` as `issues`, answered before any worker call. A second evaluation while
+one is being scored is `429` (`Overloaded`). A correction of a prediction whose answers cannot be read is `422`
+(`Unreadable`). Every error, a recovered panic included, is `{error, error_type}`: the shape every route and
+every worker already spoke, so the dashboard parses one; the `problem+json` that `w-tools` writes by default is
+replaced through `RecoverConfig.ErrorWriter`.
+
+**One owner for "can this template be used".** `GET /schemas`, `…/versions` and `…/versions/{v}` return, per
+version, `usable` and `faults` (`[{path, message}]`, from `decisions.CheckQuestions`, the runtime rules the
+worker applies), `retired`, and `authoring_issues` (what `ValidateDraft` says, for the editor only). `Decide`
+refuses on exactly that `usable`, so what the list promises is what the call does. The two rule sets stay
+separate on purpose: a template saved before an authoring rule existed, like the live `alert-triage` v2 with no
+criteria, has authoring issues and still runs. The dashboard displays the server's verdict rather than computing
+its own. `CheckQuestions` and the worker's `parse_decide` are held to the same first fault's path and
+`error_type` by `specs/decisions/worker-cases.json`; their prose is not compared.
+
+**History is read under the rules it was written under.** A prediction stores its parsed answers beside the raw
+reply, so tightening `ParseReply` later cannot empty history. A record written before that field is parsed
+under today's rules, and the view says `answers_reparsed: true`; if today's rules refuse it, the view carries
+`answers_error` with `answers: null`, the list still answers, and a correction of it is `422`.
+
+**A damaged record costs that record, not the service.** In `predictions.jsonl`, `corrections.jsonl` and
+`evaluations.jsonl` (which takes uploads), a line
+that cannot be read at start (not JSON, longer than a stored line may be, a template version never written, a
+duplicate id, a correction whose prediction is absent, a second correction) is **quarantined**: its exact bytes
+are appended to `<file>.rejected` (once, however often the store reopens), one Error line names file, line and
+reason, the record is skipped, and the lines after it are read. `GET /stats` carries `quarantined` per file, and
+start logs `N lines quarantined; see <file>.rejected`. A last line with no newline, a torn append, is set aside
+the same way and ended, so the next record starts on its own line. `templates.jsonl` and `retirements.jsonl`
+stay **fatal**: a template misread silently becomes the rules the whole history is read under, and the file is
+tiny and written a handful of times, so correctness beats availability there. For records, availability beats
+correctness: the volume and the uploads are there, and a dropped line is one record, visibly reported.
+
+**Bounds.** A stored line is at most `MaxRecord` (16 MiB): the reader's buffer and the writer's refusal are the
+same constant, and the store writes JSON without HTML escaping, so `<` costs one byte, not six. A write or sync
+that fails is truncated back; if that fails too, the store takes no more writes until a restart re-reads it.
+An evaluation's name is 1-200 characters and each class 1-100; its rows are decoded one at a time and the
+upload is refused at the first row past 10 000; one is scored at a time. A history page is at most 50.
+
+Every new question carries `criteria`, non-blank, at most 500 characters. It is what the model reads as the
+question's instructions; without it the model sees only the question's name, and the answer moves materially
+(measured through the orchestrator: `warning` 0.8507 / confidence 0.5800 with criteria, 0.6396 / 0.3194
+without). Templates stored before the rule still run: the worker falls back to the name. A `score` question's
+options are plain decimals (`-1`, `0.5`, `3`; no exponent, hex or infinity, which Go, zod and Python read
+differently), strictly rising, and inside its `range` when it has one. The editor has **no input for it yet**: loading a template and saving
 the next version keeps its criteria, but a new template cannot be given any from the dashboard.
 
 ### Control flow
@@ -249,6 +300,16 @@ Not built: latency p50/p95 at the proxy, and a calibration drift line per templa
 backend the dashboard does not have yet.
 
 ## Security and privacy
+
+- **Nothing can be erased, by decision.** The store keeps each prediction's `input_text` forever, and there is
+  no delete: append-only is what makes the training pairs trustworthy. That is acceptable for homelab alerts. It
+  matters the day someone pastes an alert that contains a credential: the only remedy is to stop the
+  orchestrator and edit the volume by hand, which `Open` will then check line by line.
+- **The container runs as root, by decision.** `USER 65532` is cheap on a fresh volume, but the deployed
+  `dita-decisions` named volume already holds root-owned `0640` files, so the image change alone would crash-loop
+  the gateway on permission denied. Doing it properly needs a one-time `chown -R 65532:65532` of that volume at
+  the same deploy, and a rollback plan for it. That is Dhira's call; until then the process stays root inside a
+  `FROM scratch` image with no shell.
 
 - **No secrets in the SPA.** `scripts/check-dist.mjs` greps `dist/` for key shapes (private key blocks,
   AWS, GitHub, Hugging Face, `sk-` style, Slack, Google, JWT, assigned secrets) and fails the build; shown to

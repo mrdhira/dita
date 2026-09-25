@@ -13,6 +13,11 @@ import (
 func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	if !configured(h.APIKey) {
+		http.Error(w, "chat is not configured: DEEPSEEK_API_KEY is missing or a placeholder", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Max body -> 1MB
 	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -54,7 +59,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := http.NewRequest("POST", DEEPSEEK_BASE_URL+"/chat/completions", bytes.NewBuffer(reqBodyJSON))
+	req, err := http.NewRequest("POST", h.baseURL+"/chat/completions", bytes.NewBuffer(reqBodyJSON))
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error when creating new http request", slog.Any("err", err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -79,10 +84,10 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Status and size only: a reply can quote what was asked, and container logs are readable on the LAN.
 	h.logger.InfoContext(ctx, "response chat completions from deepseek",
 		slog.Int("status_code", resp.StatusCode),
-		slog.String("status", resp.Status),
-		slog.String("body", string(respBody)),
+		slog.Int("bytes", len(respBody)),
 	)
 
 	w.WriteHeader(resp.StatusCode)

@@ -5,6 +5,7 @@ package decisions
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -18,6 +19,7 @@ const (
 	MaxOptions     = 20
 	MaxOptionLen   = 100
 	MaxDescription = 500
+	MaxCriteria    = 500
 	MaxText        = 20000
 )
 
@@ -27,6 +29,7 @@ var QuestionTypes = []string{"noul", "choice", "score"}
 var (
 	templateName = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
 	questionName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	decimal      = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 )
 
 // Range bounds a score question.
@@ -36,7 +39,8 @@ type Range struct {
 }
 
 // Question is one question in the `POST /decide` shape. Criteria is what the worker's model
-// reads as the question's instructions; without it the model sees only the name.
+// reads as the question's instructions. A new template must carry it; templates stored before
+// that rule may not, and the worker then falls back to the name.
 type Question struct {
 	Name     string   `json:"name"`
 	Type     string   `json:"type"`
@@ -109,6 +113,11 @@ func ValidateDraft(d Draft) []Issue {
 			}
 			options[o] = true
 		}
+		if strings.TrimSpace(q.Criteria) == "" {
+			add(at+".criteria", "say what the question asks, in the words the model reads")
+		} else if utf8.RuneCountInString(q.Criteria) > MaxCriteria {
+			add(at+".criteria", "at most %d characters", MaxCriteria)
+		}
 		if q.Range != nil {
 			if q.Type != "score" {
 				add(at+".range", "only a score question has a range")
@@ -116,8 +125,41 @@ func ValidateDraft(d Draft) []Issue {
 				add(at+".range", "min must be below max")
 			}
 		}
+		if q.Type == "score" && len(q.Options) >= MinOptions {
+			levels, ok := decimals(q.Options)
+			switch {
+			case !ok:
+				add(at+".options", "a score's options are its levels as numbers, lowest first, such as 1, 2, 3")
+			case !ascending(levels):
+				add(at+".options", "a score's levels rise: write them lowest first, each above the last")
+			case q.Range != nil && q.Range.Min < q.Range.Max && (levels[0] < q.Range.Min || levels[len(levels)-1] > q.Range.Max):
+				add(at+".range", "the range must hold every level, %s to %s", q.Options[0], q.Options[len(q.Options)-1])
+			}
+		}
 	}
 	return issues
+}
+
+// decimals reads a score's levels. Plain decimals only: Go, zod and Python each read hex,
+// exponents and infinities differently, and a level is a number a person picked.
+func decimals(options []string) ([]float64, bool) {
+	levels := make([]float64, len(options))
+	for i, o := range options {
+		if !decimal.MatchString(o) {
+			return nil, false
+		}
+		levels[i], _ = strconv.ParseFloat(o, 64)
+	}
+	return levels, true
+}
+
+func ascending(levels []float64) bool {
+	for i := 1; i < len(levels); i++ {
+		if !(levels[i-1] < levels[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateText applies the rule for pasted state text.

@@ -3,6 +3,7 @@ package inferences
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -22,17 +23,22 @@ const DefaultTimeout = 120 * time.Second
 // without touching the model lock, so a worker that needs longer is not answering at all.
 const DefaultProbeTimeout = 5 * time.Second
 
+// MinAPIToken refuses a token short enough to guess; `openssl rand -hex 32` gives 64.
+const MinAPIToken = 32
+
 // Worker is one upstream: its container name and the base URL it answers on.
 type Worker struct {
 	Name string
 	URL  *url.URL
 }
 
-// Config says where each worker is and how long a request to one may take.
+// Config says where each worker is and how long a request to one may take. APIToken, when
+// set, is the secret every state-changing route requires; empty leaves them open.
 type Config struct {
 	Workers      []Worker
 	Timeout      time.Duration
 	ProbeTimeout time.Duration
+	APIToken     string
 }
 
 var workerEnv = []struct{ name, env string }{
@@ -69,6 +75,12 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("INFERENCES_TIMEOUT: %s is not positive", raw)
 		}
 		cfg.Timeout = d
+	}
+	if raw := getenv("INFERENCES_API_TOKEN"); raw != "" {
+		if strings.TrimSpace(raw) != raw || len(raw) < MinAPIToken {
+			return Config{}, fmt.Errorf("INFERENCES_API_TOKEN: at least %d characters, no surrounding space", MinAPIToken)
+		}
+		cfg.APIToken = raw
 	}
 	return cfg, nil
 }

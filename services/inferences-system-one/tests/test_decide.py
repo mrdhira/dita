@@ -4,12 +4,16 @@ and the reply the orchestrator's `ParseReply` reads."""
 from __future__ import annotations
 
 import json
+import math
 import unittest
+from pathlib import Path
 
 import numpy as np
 
-from system_one_worker.decide import Refusal, parse_decide, reply, to_model
+from system_one_worker.decide import Refusal, labels, parse_decide, reply, to_model
 from system_one_worker.engines.decision import Decision, confidence_from_probs
+
+WORKER_CASES = Path(__file__).resolve().parents[3] / "specs" / "decisions" / "worker-cases.json"
 
 SEVERITY = {"name": "severity", "type": "choice", "options": ["info", "warning", "critical"]}
 HUMAN = {"name": "needs_human", "type": "noul", "options": ["false", "true"]}
@@ -111,6 +115,60 @@ class ReplyTest(unittest.TestCase):
             reply("m", "r", [SEVERITY], [Decision(np.array([0.5, 0.5]), np.zeros(2))])
         with self.assertRaises(ValueError):
             reply("m", "r", [SEVERITY, HUMAN], [Decision(np.array([0.2, 0.3, 0.5]), np.zeros(2))])
+
+
+class WorkerCasesTest(unittest.TestCase):
+    """specs/decisions/worker-cases.json, which the orchestrator's Go suite reads too: its
+    pre-check must refuse in these words, and its adapter must read these replies."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cases = json.loads(WORKER_CASES.read_text(encoding="utf-8"))
+
+    def test_the_fixture_holds_both_verdicts_at_the_score_range(self) -> None:
+        ranged = [c for c in self.cases["requests"] if any("range" in q for q in c["request"]["questions"])]
+        self.assertTrue(any(c.get("accepted") for c in ranged), "a score carrying range, accepted")
+        self.assertTrue(any(c.get("refused", {}).get("path", "").endswith(".range") for c in ranged),
+                        "a range against its options")
+        self.assertTrue(any("act_probability" in c["reply"] for c in self.cases["replies"] if "answers" in c))
+
+    def test_requests_as_the_orchestrator_sends_them(self) -> None:
+        for case in self.cases["requests"]:
+            body = json.dumps(case["request"]).encode()
+            with self.subTest(case["name"]):
+                if case.get("accepted"):
+                    self.assertEqual(parse_decide(body)[1], case["request"]["questions"])
+                    continue
+                with self.assertRaises(Refusal) as refused:
+                    parse_decide(body)
+                got = refused.exception
+                self.assertEqual({"error_type": got.error_type, "path": got.path}, case["refused"])
+                self.assertEqual(json.loads(got.response().body)["path"], case["refused"]["path"])
+
+    def test_the_replies_the_orchestrator_accepts_are_what_this_worker_emits(self) -> None:
+        accepted = [c for c in self.cases["replies"] if "answers" in c]
+        self.assertGreaterEqual(len(accepted), 2)
+        for case in accepted:
+            served = json.loads(case["reply"])
+            with self.subTest(case["name"]):
+                decisions = []
+                for q, a in zip(case["questions"], served["answers"], strict=True):
+                    act = a["act_probability"]
+                    with np.errstate(divide="ignore"):
+                        logits = np.log(np.array([act, 1.0 - act]))
+                    decisions.append(Decision(np.array([a["probabilities"][o] for o in labels(q)]), logits))
+                emitted = reply(served["model_id"], served["model_revision"], case["questions"], decisions)
+                self.assertTrue(_close(emitted, served), f"this worker would emit {emitted}")
+
+
+def _close(a: object, b: object) -> bool:
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_close(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_close(x, y) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return isinstance(a, (int, float)) and isinstance(b, (int, float)) and math.isclose(a, b, abs_tol=1e-12)
+    return a == b
 
 
 if __name__ == "__main__":

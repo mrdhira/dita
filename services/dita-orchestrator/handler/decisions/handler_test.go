@@ -11,7 +11,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,8 +26,8 @@ const stubReply = `{"model_id":"stub-system-one","model_revision":"STUB-not-a-mo
 	{"name":"fraud","probabilities":{"true":0.3,"false":0.7},"confidence":0.7}]}`
 
 var draft = `{"name":"alert-triage","description":"","questions":[
-	{"name":"severity","type":"choice","options":["low","medium","high"]},
-	{"name":"fraud","type":"noul","options":["true","false"]}]}`
+	{"name":"severity","type":"choice","options":["low","medium","high"],"criteria":"How severe is it?"},
+	{"name":"fraud","type":"noul","options":["true","false"],"criteria":"Is this fraud?"}]}`
 
 type env struct {
 	t      *testing.T
@@ -49,6 +51,7 @@ func newEnv(t *testing.T, dir string, workerURL *url.URL) *env {
 	mux.HandleFunc("POST /schemas", h.SaveTemplate)
 	mux.HandleFunc("GET /schemas/{name}/versions", h.Versions)
 	mux.HandleFunc("GET /schemas/{name}/versions/{version}", h.Template)
+	mux.HandleFunc("POST /schemas/{name}/versions/{version}/retire", h.Retire)
 	mux.HandleFunc("POST /decisions", h.Decide)
 	mux.HandleFunc("GET /decisions", h.Recent)
 	mux.HandleFunc("GET /decisions/{id}", h.Decision)
@@ -115,6 +118,7 @@ func TestNothingIsWrittenUnlessTheWorkerAnswered(t *testing.T) {
 		{"no model resident: the worker's 503, unchanged", worker(t, 503, noModel), 503, noModel, "no_model"},
 		{"a schema the worker refuses: its 400", worker(t, 400, `{"error":"bad schema"}`), 400, `{"error":"bad schema"}`, "schema_invalid"},
 		{"an engine refusal: its 422", worker(t, 422, `{"error":"refused"}`), 422, `{"error":"refused"}`, "engine_refused"},
+		{"the worker's one slot is taken: its 429", worker(t, 429, `{"error":"Model is overloaded","error_type":"Overloaded"}`), 429, "Overloaded", "busy"},
 		{"the worker is not running", closedPort(t), 503, `"reason":"not_running"`, "not_running"},
 		{"an answer to a different question", worker(t, 200, `{"model_revision":"r","answers":[]}`), 502, "answered 0 questions", "bad_reply"},
 	}
@@ -208,6 +212,12 @@ func TestWhatTheRoutesRefuse(t *testing.T) {
 		{"a version that is not a number", "GET", "/schemas/alert-triage/versions/one", "", 400, "number"},
 		{"a correction to nothing", "POST", "/decisions/nope/correction", `{"answers":{}}`, 404, "not found"},
 		{"a limit out of range", "GET", "/decisions?limit=0", "", 400, "limit"},
+		{"a limit over the page", "GET", "/decisions?limit=51", "", 400, "limit is 1-50"},
+		{"the largest page", "GET", "/decisions?limit=50", "", 200, "decisions"},
+		{"trailing data after a correction", "POST", "/decisions/nope/correction", `{"answers":{}} {}`, 400, "trailing data"},
+		{"trailing data after an evaluation", "POST", "/evaluations", `{"name":"x","rows":[]} {}`, 400, "trailing data"},
+		{"an unknown evaluation field", "POST", "/evaluations", `{"name":"x","rows":[],"model":"m"}`, 400, "unknown field"},
+		{"an evaluation whose rows are not a list", "POST", "/evaluations", `{"name":"x","rows":{}}`, 400, "expected ["},
 		{"an evaluation with a label it does not score", "POST", "/evaluations",
 			`{"name":"x","rows":[{"label":"c","probabilities":{"a":0.5,"b":0.5}}]}`, 400, "labelled"},
 	}
@@ -242,5 +252,294 @@ func TestTemplatesAndEvaluationsRoundTrip(t *testing.T) {
 	_, list, _ := newEnv(t, dir, e.worker).call("GET", "/evaluations", "")
 	if n := len(list["evaluations"].([]any)); n != 1 {
 		t.Fatalf("%d evaluations after reload", n)
+	}
+}
+
+// counting is a worker that answers stubReply and counts what it was asked.
+func counting(t *testing.T, calls *atomic.Int32) *url.URL {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(stubReply))
+	}))
+	t.Cleanup(srv.Close)
+	u, _ := url.Parse(srv.URL)
+	return u
+}
+
+func TestARetiredVersionIsRefusedWithoutAskingTheWorker(t *testing.T) {
+	var calls atomic.Int32
+	e := newEnv(t, t.TempDir(), counting(t, &calls))
+	e.call("POST", "/schemas", draft)
+	e.call("POST", "/schemas", draft)
+
+	code, first, body := e.call("POST", "/schemas/alert-triage/versions/1/retire", "")
+	if code != 200 || first["name"] != "alert-triage" || first["version"] != 1.0 || first["retired"] != true || first["retired_at"] == nil {
+		t.Fatalf("retire: %d %s", code, body)
+	}
+	code, again, _ := e.call("POST", "/schemas/alert-triage/versions/1/retire", "")
+	if code != 200 || again["retired_at"] != first["retired_at"] {
+		t.Fatalf("retiring twice: %d %v, want 200 and the first timestamp %v", code, again["retired_at"], first["retired_at"])
+	}
+
+	_, versions, _ := e.call("GET", "/schemas/alert-triage/versions", "")
+	list := versions["versions"].([]any)
+	if list[0].(map[string]any)["retired"] != true || list[1].(map[string]any)["retired"] != false {
+		t.Fatalf("versions %v", list)
+	}
+	_, latest, _ := e.call("GET", "/schemas", "")
+	if tpl := latest["templates"].([]any)[0].(map[string]any); tpl["version"] != 2.0 || tpl["retired"] != false {
+		t.Fatalf("templates %v", tpl)
+	}
+
+	code, refused, body := e.call("POST", "/decisions", decide)
+	if code != 410 || refused["error_type"] != "Retired" || !strings.Contains(body, "version 1 is retired: pick another version") {
+		t.Fatalf("deciding on a retired version: %d %s", code, body)
+	}
+	if calls.Load() != 0 || e.predictionsOnDisk() != 0 {
+		t.Fatalf("a retired version reached the worker %d times", calls.Load())
+	}
+	code, _, body = e.call("POST", "/decisions", strings.Replace(decide, `"version":1`, `"version":2`, 1))
+	if code != 201 || calls.Load() != 1 {
+		t.Fatalf("the live version: %d %s after %d worker calls", code, body, calls.Load())
+	}
+
+	for _, c := range []struct {
+		path     string
+		status   int
+		mentions string
+	}{
+		{"/schemas/alert-triage/versions/3/retire", 404, "not found"},
+		{"/schemas/nope/versions/1/retire", 404, "not found"},
+		{"/schemas/alert-triage/versions/one/retire", 400, "number"},
+	} {
+		if code, _, body := e.call("POST", c.path, ""); code != c.status || !strings.Contains(body, c.mentions) {
+			t.Fatalf("POST %s: %d %s, want %d", c.path, code, body, c.status)
+		}
+	}
+}
+
+// alert-triage as the deployed store holds it: v1 saved before the noul rule, v2 before criteria
+// were required. The worker refuses v1 and runs v2.
+const legacyTemplates = `{"name":"alert-triage","version":1,"description":"","questions":[{"name":"severity","type":"choice","options":["info","warning","critical"]},{"name":"escalate","type":"noul","options":["yes","no","unknown"]}],"created_at":"2026-09-20T10:00:00Z"}
+{"name":"alert-triage","version":2,"description":"","questions":[{"name":"severity","type":"choice","options":["low","medium","high"]},{"name":"fraud","type":"noul","options":["true","false"]}],"created_at":"2026-09-21T10:00:00Z"}
+`
+
+func TestTheListSaysWhatADecisionWillDo(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := decisions.Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "templates.jsonl"), []byte(legacyTemplates), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	e := newEnv(t, dir, counting(t, &calls))
+
+	_, listed, _ := e.call("GET", "/schemas/alert-triage/versions", "")
+	versions := listed["versions"].([]any)
+	_, latest, _ := e.call("GET", "/schemas", "")
+	for _, v := range append(append([]any{}, versions...), latest["templates"].([]any)...) {
+		fields := v.(map[string]any)
+		for _, key := range []string{"retired", "usable", "faults", "authoring_issues"} {
+			if _, ok := fields[key]; !ok {
+				t.Fatalf("version %v is listed without %q", fields["version"], key)
+			}
+		}
+		for _, list := range []string{"faults", "authoring_issues"} {
+			for _, issue := range fields[list].([]any) {
+				if kv := issue.(map[string]any); len(kv) != 2 || kv["path"] == nil || kv["message"] == nil {
+					t.Fatalf("%s entry %v is not {path, message}", list, kv)
+				}
+			}
+		}
+	}
+	v1, v2 := versions[0].(map[string]any), versions[1].(map[string]any)
+	if v1["usable"] != false || v1["retired"] != false || v1["faults"].([]any)[0].(map[string]any)["path"] != "questions.1.options" {
+		t.Fatalf("v1 %v", v1)
+	}
+	if v2["usable"] != true || len(v2["faults"].([]any)) != 0 {
+		t.Fatalf("v2, which the worker runs, is listed as %v %v", v2["usable"], v2["faults"])
+	}
+	authoring := v2["authoring_issues"].([]any)
+	if len(authoring) != 2 || authoring[0].(map[string]any)["path"] != "questions.0.criteria" {
+		t.Fatalf("v2's authoring issues %v, want the two missing criteria", authoring)
+	}
+
+	code, refused, body := e.call("POST", "/decisions", decide)
+	issues, _ := refused["issues"].([]any)
+	if code != 400 || refused["error_type"] != "Validation" || len(issues) == 0 ||
+		issues[0].(map[string]any)["path"] != "questions.1.options" {
+		t.Fatalf("deciding on v1: %d %s", code, body)
+	}
+	if calls.Load() != 0 || e.predictionsOnDisk() != 0 {
+		t.Fatalf("the worker was asked %d times for what the list already says it refuses", calls.Load())
+	}
+	_, stats, _ := e.call("GET", "/stats", "")
+	if stats["outcomes"].(map[string]any)["schema_invalid"] != 1.0 {
+		t.Fatalf("outcomes %v", stats["outcomes"])
+	}
+
+	code, _, body = e.call("POST", "/decisions", strings.Replace(decide, `"version":1`, `"version":2`, 1))
+	if code != 201 || calls.Load() != 1 {
+		t.Fatalf("v2, listed usable, did not run: %d %s", code, body)
+	}
+}
+
+func sameJSON(t *testing.T, a, b string) bool {
+	t.Helper()
+	var x, y any
+	if json.Unmarshal([]byte(a), &x) != nil || json.Unmarshal([]byte(b), &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+func evaluationBody(rows int) string {
+	var b strings.Builder
+	b.WriteString(`{"name":"bulk","rows":[`)
+	for i := range rows {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"label":"a","probabilities":{"a":0.9,"b":0.1}}`)
+	}
+	b.WriteString("]}")
+	return b.String()
+}
+
+func TestAnEvaluationIsBoundedBeforeItIsBuilt(t *testing.T) {
+	e := newEnv(t, t.TempDir(), worker(t, 200, stubReply))
+	if code, _, body := e.call("POST", "/evaluations", evaluationBody(decisions.MaxRows)); code != 201 {
+		t.Fatalf("exactly MaxRows rows: %d %s", code, body)
+	}
+	if code, _, body := e.call("POST", "/evaluations", evaluationBody(decisions.MaxRows+1)); code != 400 || !strings.Contains(body, "between 1 and 10000 rows") {
+		t.Fatalf("MaxRows+1 rows: %d %s", code, body)
+	}
+
+	huge := evaluationBody(3 * decisions.MaxRows)
+	reader := &countingReader{r: strings.NewReader(huge)}
+	if _, _, err := decodeEvaluation(reader); err == nil {
+		t.Fatal("three times MaxRows decoded")
+	}
+	if reader.n >= len(huge)/2 {
+		t.Fatalf("read %d of %d bytes: the rows were built before the cap was checked", reader.n, len(huge))
+	}
+}
+
+type countingReader struct {
+	r *strings.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+// The limits are written here as numbers, not read from the constants, so raising a constant
+// fails this test instead of growing its fixture.
+func TestBodiesOverTheirLimitAreRefusedUnread(t *testing.T) {
+	e := newEnv(t, t.TempDir(), worker(t, 200, stubReply))
+	e.call("POST", "/schemas", draft)
+	sized := func(prefix, suffix string, size int) string {
+		return prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+	}
+	for _, c := range []struct {
+		path, prefix, suffix string
+		limit                int
+	}{
+		{"/decisions", `{"text":"`, `","schema":{"name":"alert-triage","version":1}}`, 1 << 20},
+		{"/evaluations", `{"name":"`, `","rows":[]}`, 8 << 20},
+	} {
+		over := sized(c.prefix, c.suffix, c.limit+1)
+		if code, _, body := e.call("POST", c.path, over); code != 400 || !strings.Contains(body, "too large") {
+			t.Fatalf("POST %s of %d bytes, one over %d: %d %.200s", c.path, len(over), c.limit, code, body)
+		}
+		under := sized(c.prefix, c.suffix, c.limit)
+		if _, _, body := e.call("POST", c.path, under); strings.Contains(body, "too large") {
+			t.Fatalf("POST %s of exactly %d bytes was refused as too large", c.path, len(under))
+		}
+	}
+}
+
+func TestOneEvaluationAtATime(t *testing.T) {
+	store, _ := decisions.Open(t.TempDir())
+	h := New(store, inferences.Worker{Name: inferences.SystemOne, URL: closedPort(t)}, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	post := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.Evaluate(rec, httptest.NewRequest("POST", "/evaluations", strings.NewReader(evaluationBody(2))))
+		return rec
+	}
+	h.scoring <- struct{}{}
+	if rec := post(); rec.Code != 429 || !strings.Contains(rec.Body.String(), "Overloaded") {
+		t.Fatalf("while one is scored: %d %s", rec.Code, rec.Body)
+	}
+	<-h.scoring
+	if rec := post(); rec.Code != 201 {
+		t.Fatalf("once it finished: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post(); rec.Code != 201 {
+		t.Fatalf("the slot was not given back: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestOneUnreadableRecordNeverFailsTheHistory(t *testing.T) {
+	dir := t.TempDir()
+	e := newEnv(t, dir, worker(t, 200, stubReply))
+	e.call("POST", "/schemas", draft)
+	e.call("POST", "/decisions", decide)
+	f, _ := os.OpenFile(filepath.Join(dir, "predictions.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(`{"id":"old","schema_id":"alert-triage","schema_version":1,"prediction":{"model_revision":"r","answers":[]}}` + "\n")
+	f.Close()
+	reloaded := newEnv(t, dir, e.worker)
+
+	_, stats, _ := reloaded.call("GET", "/stats", "")
+	if q := stats["quarantined"].(map[string]any); q["predictions.jsonl"] != 0.0 || q["corrections.jsonl"] != 0.0 || q["evaluations.jsonl"] != 0.0 {
+		t.Fatalf("a readable-but-stale record was quarantined: %v", q)
+	}
+	code, recent, body := reloaded.call("GET", "/decisions?limit=5", "")
+	list, _ := recent["decisions"].([]any)
+	if code != 200 || len(list) != 2 {
+		t.Fatalf("history with one unreadable record: %d %s", code, body)
+	}
+	old, fresh := list[0].(map[string]any), list[1].(map[string]any)
+	if old["answers"] != nil || old["answers_reparsed"] != true || !strings.Contains(old["answers_error"].(string), "today's rules refuse it") {
+		t.Fatalf("the unreadable record renders as %v", old)
+	}
+	if fresh["answers_reparsed"] != false || fresh["answers_error"] != nil || len(fresh["answers"].([]any)) != 2 {
+		t.Fatalf("the readable record renders as %v", fresh)
+	}
+	if code, _, body := reloaded.call("POST", "/decisions/old/correction", `{"answers":{"severity":"low","fraud":"true"}}`); code != 422 || !strings.Contains(body, "Unreadable") {
+		t.Fatalf("correcting it: %d %s", code, body)
+	}
+}
+
+func TestAQuarantinedLineIsCountedOnStats(t *testing.T) {
+	dir := t.TempDir()
+	e := newEnv(t, dir, worker(t, 200, stubReply))
+	e.call("POST", "/schemas", draft)
+	e.call("POST", "/decisions", decide)
+	f, _ := os.OpenFile(filepath.Join(dir, "predictions.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("{damaged\n")
+	f.Close()
+	e.call("POST", "/evaluations", `{"name":"kept","rows":[{"label":"a","probabilities":{"a":0.9,"b":0.1}}]}`)
+	f, _ = os.OpenFile(filepath.Join(dir, "evaluations.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("{damaged too\n")
+	f.Close()
+
+	reloaded := newEnv(t, dir, e.worker)
+	_, stats, body := reloaded.call("GET", "/stats", "")
+	q, _ := stats["quarantined"].(map[string]any)
+	if q["predictions.jsonl"] != 1.0 || q["corrections.jsonl"] != 0.0 || q["evaluations.jsonl"] != 1.0 {
+		t.Fatalf("stats after one damaged line in each of two files: %s", body)
+	}
+	if _, evals, _ := reloaded.call("GET", "/evaluations", ""); len(evals["evaluations"].([]any)) != 1 {
+		t.Fatalf("the good evaluation is not served: %v", evals)
+	}
+	if _, recent, _ := reloaded.call("GET", "/decisions", ""); len(recent["decisions"].([]any)) != 1 {
+		t.Fatalf("the good history is not served: %v", recent)
 	}
 }

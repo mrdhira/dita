@@ -1,5 +1,5 @@
 {
-  "_comment": "Validity cases for a schema template. The orchestrator's Go rules and the dashboard's zod schema must both reach these verdicts, with these issue paths.",
+  "_comment": "Validity cases. cases: a schema template and the issue paths expected. texts: the pasted state text, spelled as `repeat` written `times` times (so the boundary is derived, not pasted), and the issue paths expected. The orchestrator's Go rules and the dashboard's zod schema must both reach these verdicts, with these paths. Lengths are counted in characters; every case stays in the Basic Multilingual Plane, where Go's runes and JavaScript's UTF-16 units agree.",
   "cases": [
     {
       "name": "the smallest valid template",
@@ -13,7 +13,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -31,7 +32,8 @@
             "options": [
               "false",
               "true"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "b",
@@ -61,7 +63,8 @@
             "range": {
               "min": 1,
               "max": 20
-            }
+            },
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "c",
@@ -69,7 +72,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -87,7 +91,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q1",
@@ -95,7 +100,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q2",
@@ -103,7 +109,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q3",
@@ -111,7 +118,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q4",
@@ -119,7 +127,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q5",
@@ -127,7 +136,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q6",
@@ -135,7 +145,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q7",
@@ -143,7 +154,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q8",
@@ -151,7 +163,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q9",
@@ -159,7 +172,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q10",
@@ -167,7 +181,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q11",
@@ -175,7 +190,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q12",
@@ -183,7 +199,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q13",
@@ -191,7 +208,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q14",
@@ -199,7 +217,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q15",
@@ -207,7 +226,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q16",
@@ -215,7 +235,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q17",
@@ -223,7 +244,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q18",
@@ -231,7 +253,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q19",
@@ -239,7 +262,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -257,7 +281,8 @@
             "options": [
               "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
               "y"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -275,7 +300,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -293,7 +319,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -313,7 +340,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -333,7 +361,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -353,7 +382,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -384,7 +414,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q1",
@@ -392,7 +423,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q2",
@@ -400,7 +432,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q3",
@@ -408,7 +441,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q4",
@@ -416,7 +450,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q5",
@@ -424,7 +459,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q6",
@@ -432,7 +468,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q7",
@@ -440,7 +477,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q8",
@@ -448,7 +486,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q9",
@@ -456,7 +495,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q10",
@@ -464,7 +504,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q11",
@@ -472,7 +513,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q12",
@@ -480,7 +522,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q13",
@@ -488,7 +531,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q14",
@@ -496,7 +540,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q15",
@@ -504,7 +549,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q16",
@@ -512,7 +558,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q17",
@@ -520,7 +567,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q18",
@@ -528,7 +576,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q19",
@@ -536,7 +585,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "q20",
@@ -544,7 +594,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -564,7 +615,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -584,7 +636,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "a",
@@ -592,7 +645,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -612,7 +666,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -631,7 +686,8 @@
             "type": "choice",
             "options": [
               "only"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -670,7 +726,8 @@
               "o18",
               "o19",
               "o20"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -690,7 +747,8 @@
             "options": [
               "low",
               "  "
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -710,7 +768,8 @@
             "options": [
               "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
               "y"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -731,7 +790,8 @@
               "low",
               "high",
               "low"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -755,7 +815,8 @@
             "range": {
               "min": 0,
               "max": 1
-            }
+            },
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -779,7 +840,8 @@
             "range": {
               "min": 2,
               "max": 2
-            }
+            },
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -798,7 +860,8 @@
             "type": "bad",
             "options": [
               "one"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           },
           {
             "name": "a",
@@ -806,7 +869,8 @@
             "options": [
               "low",
               "high"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -829,7 +893,8 @@
             "options": [
               "yes",
               "no"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -850,7 +915,8 @@
               "false",
               "true",
               "unknown"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -870,7 +936,8 @@
             "options": [
               "true",
               "false"
-            ]
+            ],
+            "criteria": "Which option fits this alert best?"
           }
         ]
       },
@@ -895,6 +962,397 @@
         ]
       },
       "issues": []
+    },
+    {
+      "name": "a question without criteria",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.criteria"
+      ]
+    },
+    {
+      "name": "blank criteria",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ],
+            "criteria": "   "
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.criteria"
+      ]
+    },
+    {
+      "name": "criteria of exactly 500 characters",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ],
+            "criteria": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "criteria of 501 characters",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "severity",
+            "type": "choice",
+            "options": [
+              "low",
+              "high"
+            ],
+            "criteria": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.criteria"
+      ]
+    },
+    {
+      "name": "a score with numeric levels, lowest first",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "1",
+              "2",
+              "3"
+            ],
+            "criteria": "How soon must someone act?"
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "a score with decimal and negative levels",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "-1",
+              "0",
+              "0.5",
+              "2"
+            ],
+            "criteria": "How soon must someone act?",
+            "range": {
+              "min": -1,
+              "max": 2
+            }
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "a score in words",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "criteria": "How soon must someone act?"
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a score level that is not a finite number",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "1",
+              "Infinity"
+            ],
+            "criteria": "How soon must someone act?"
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a score level written as an exponent",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "1",
+              "1e3"
+            ],
+            "criteria": "How soon must someone act?"
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a score whose levels fall",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "3",
+              "2",
+              "1"
+            ],
+            "criteria": "How soon must someone act?"
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a score with a level repeated as another spelling",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "1",
+              "1.0",
+              "2"
+            ],
+            "criteria": "How soon must someone act?"
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "a score with levels outside its range",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "options": [
+              "1",
+              "2",
+              "3"
+            ],
+            "criteria": "How soon must someone act?",
+            "range": {
+              "min": 1,
+              "max": 2
+            }
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.range"
+      ]
+    },
+    {
+      "name": "an invalid range around outside levels: only the range",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "criteria": "How soon must someone act?",
+            "options": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5"
+            ],
+            "range": {
+              "min": 5,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.range"
+      ]
+    },
+    {
+      "name": "levels that fall and leave a valid range: only the options",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "criteria": "How soon must someone act?",
+            "options": [
+              "5",
+              "4",
+              "3"
+            ],
+            "range": {
+              "min": 1,
+              "max": 4
+            }
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    },
+    {
+      "name": "words under a valid range: only the options",
+      "template": {
+        "name": "alert-triage",
+        "description": "",
+        "questions": [
+          {
+            "name": "urgency",
+            "type": "score",
+            "criteria": "How soon must someone act?",
+            "options": [
+              "low",
+              "high"
+            ],
+            "range": {
+              "min": 1,
+              "max": 2
+            }
+          }
+        ]
+      },
+      "issues": [
+        "questions.0.options"
+      ]
+    }
+  ],
+  "texts": [
+    {
+      "name": "one character",
+      "repeat": "x",
+      "times": 1,
+      "issues": []
+    },
+    {
+      "name": "exactly 20000 characters",
+      "repeat": "x",
+      "times": 20000,
+      "issues": []
+    },
+    {
+      "name": "20001 characters",
+      "repeat": "x",
+      "times": 20001,
+      "issues": [
+        "text"
+      ]
+    },
+    {
+      "name": "exactly 20000 two-byte characters",
+      "repeat": "é",
+      "times": 20000,
+      "issues": []
+    },
+    {
+      "name": "20001 two-byte characters",
+      "repeat": "é",
+      "times": 20001,
+      "issues": [
+        "text"
+      ]
+    },
+    {
+      "name": "empty",
+      "repeat": "",
+      "times": 0,
+      "issues": [
+        "text"
+      ]
+    },
+    {
+      "name": "only whitespace",
+      "repeat": " \n\t",
+      "times": 3,
+      "issues": [
+        "text"
+      ]
     }
   ]
 }

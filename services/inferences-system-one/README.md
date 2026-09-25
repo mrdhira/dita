@@ -46,12 +46,23 @@ curl -s http://inferences-system-one:8080/decide -H 'Content-Type: application/j
 - **A `noul` question's options must be exactly `false` and `true`**: that is the only way the
   model answers one. A template whose noul says `yes`/`no` is refused with a 400, never guessed at.
 - `criteria` is the model's instructions for that question. Without it the question's name is
-  the only text that says what is asked, so it is used instead; write criteria.
+  the only text that says what is asked, so it is used instead. The orchestrator requires criteria
+  on every new template (`ValidateDraft`); this worker still accepts a question without them, for
+  templates stored before that rule and for direct callers. The requirement is the orchestrator's
+  contract, and a refusal here would break those stored templates rather than protect anything.
 - `range` on a score is accepted and ignored: the model reads a score's options as its levels, in
   order. It is refused only when it contradicts those options (numeric levels out of order or outside it).
-- `act_probability` is the model's escalate head. On this checkpoint it is 1.0 for every input
-  measured (its logits sit near ±1500), so it carries no signal yet.
-- One request at a time. The worker's own refusals carry a JSON body `{"error", "error_type"}`:
+- `act_probability` is the model's escalate head. **On this checkpoint it is a constant 1.0**: a
+  field that looks like information and is not. Do not build on it; see
+  [Known behaviour of this checkpoint](#known-behaviour-of-this-checkpoint).
+- The orchestrator refuses what this worker would refuse before calling it, at the same place.
+  [`specs/decisions/worker-cases.json`](../../specs/decisions/worker-cases.json) holds both sides to
+  that by `error_type` and the path of the first fault, not by wording: this suite runs its requests
+  through `parse_decide` and checks that the replies the orchestrator accepts are what `reply` emits;
+  the Go suite runs the same file through `CheckQuestions` and `ParseReply`. A change to either side's
+  contract fails both suites.
+- One request at a time. The worker's own refusals carry a JSON body `{"error", "error_type"}`, plus
+  `path` (`questions.1.options`, zod's dotted style) when a question is at fault:
   400 for a request it will not run; 413 when the planned encoder work (padded tokens, two
   questions a batch) is over 8192, which would not finish inside the deadline; 429 while another
   request is inside the model; 503 with nothing resident; 504 when the 100 s deadline passes
@@ -62,6 +73,21 @@ curl -s http://inferences-system-one:8080/decide -H 'Content-Type: application/j
   but with at most 20 options upstream's layout always shrinks them to fit, so the worker never
   answers that 422 under this checkpoint. Long options sharing a prefix can be cut to the same
   text; the model then cannot tell them apart and nothing says so.
+
+## Known behaviour of this checkpoint
+
+Measured, not assumed. Each is the case for the calibration work, which needs labelled examples.
+
+1. **`act_probability` is 1.0 for every input.** The act head's logits sit between +1080 and +1560 for
+   index 0 and between -1290 and -1850 for index 1 on all six parity fixtures, so its softmax saturates
+   ([build report](../../docs/inferences/system-one/%5B3%5Dbuild-report.md), parity guard). It is served
+   because the contract carries it; it says nothing about the input.
+2. **`needs_human` under-calls on our own alerts.** The immich OOM crash loop measured `true` at 0.0172
+   (spike reference, reproduced by the parity guard); a disk at 90% measured `false` at 1.000. A human
+   should look at both. Severity on the same inputs was sane: the OOM loop is `warning` at 0.8507.
+3. **A 5-level score comes back nearly uniform.** One measured 0.31 / 0.22 / 0.16 / 0.16 / 0.15, confidence
+   0.026. For an answer you intend to act on, ask three levels with concrete criteria, or a choice with
+   named levels.
 
 ## How to use it
 

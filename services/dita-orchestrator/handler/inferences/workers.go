@@ -3,9 +3,11 @@ package inferences
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // report is one worker's state as the gateway saw it just now.
@@ -79,4 +81,27 @@ func (g *Gateway) get(ctx context.Context, worker Worker, path string) (int, []b
 		return 0, nil, err
 	}
 	return resp.StatusCode, body, nil
+}
+
+// CheckWorkerDeadline reads the system-one worker's published `deadline_s` and refuses a proxy
+// timeout that does not outlast it: the worker would then hold its only slot for a caller the
+// gateway has already given up on. checked is false when there was nothing to compare, a worker
+// not yet up or one that publishes no deadline; the caller logs that.
+func (g *Gateway) CheckWorkerDeadline(ctx context.Context) (checked bool, err error) {
+	worker, ok := g.byName[SystemOne]
+	if !ok {
+		return false, nil
+	}
+	status, body, err := g.get(ctx, worker, "/info")
+	var info struct {
+		DeadlineS *float64 `json:"deadline_s"`
+	}
+	if err != nil || status != http.StatusOK || json.Unmarshal(body, &info) != nil || info.DeadlineS == nil {
+		return false, nil
+	}
+	deadline := time.Duration(*info.DeadlineS * float64(time.Second))
+	if g.cfg.Timeout <= deadline {
+		return true, fmt.Errorf("INFERENCES_TIMEOUT %s does not outlast %s's published deadline of %s", g.cfg.Timeout, SystemOne, deadline)
+	}
+	return true, nil
 }

@@ -64,3 +64,18 @@
   the state only from the field that reports it (`state === "no_model"`); every other null is
   "unknown", said as such.
 - **Check:** grep the UI for negative claims ("no", "none", "not") and find each one's source field.
+
+## A hang is not a failure
+- **Pattern:** the stale treatment keyed on `isError`. A request that never answers never fails, so
+  a paused orchestrator or a dropped network left every row green for as long as it hung.
+- **Rule:** anything that claims freshness needs two triggers, failure and age, and every polled
+  read needs a deadline that turns a hang into a failure. Test both with a fetch that never
+  settles: one that ignores its signal (age must fire) and one that honours it (the deadline must).
+
+## `tsc -p .` on a solution tsconfig checks nothing
+- **Pattern:** `npx tsc --noEmit -p .` printed nothing on a type error, because the root
+  `tsconfig.json` only lists references. Lint and vitest do not type-check either, so a
+  `signal: undefined` under `exactOptionalPropertyTypes` reached three commits before `pnpm build`
+  caught it.
+- **Rule:** the dashboard's type gate is `pnpm build` (`tsc -b`). Run it before every commit, and
+  build each commit of a series on its own before pushing.

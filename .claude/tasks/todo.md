@@ -289,3 +289,25 @@ Baseline before any change: `pnpm vitest run --maxWorkers=2` → 12 files, 96 te
 - [x] A3. 401 / 403 / 415 as sentences; `problem+json` and `{error}` both read (`toProblem`).
 - [x] A4. Caddyfile comment and the doc state the LAN deployment; `limit=50` already at the ceiling.
 - [x] A5. Audit finding 4, dashboard side: `answers: null` shown as unreadable, no correction form.
+
+## Review round two (`.claude/tasks/console-r1-review2-fixes.md`, report at `.claude/review/report.md`)
+- [x] A. Staleness is failure **or age**: `useStaleness` (failed | late | null), budget 2 × interval +
+      read deadline; polled reads (`/workers`, `/metrics`) carry React Query's signal plus a 10 s
+      deadline and end as `NoAnswer`. Fleet rows, service header, strip, Overview and Metrics.
+- [x] B. `describeError` knows the route: on `/workers` and `/metrics/*` a reasonless 5xx is "the
+      gateway, or something in front of it", never "no model". Docstring true for every route.
+- [x] C. A worker page must carry `dita_worker_uptime_seconds`; a family with no `# TYPE` line is
+      unknown, not "none since the last restart" (Metrics tab and Overview figures).
+- [x] D. 502 on `/workers` / `/metrics` without a `worker` field gets the gateway title; `NotMetrics`
+      gets its own title.
+- [x] E. Tests: Fleet resident-for `—` after a failed `/metrics`; an `extra` row goes stale; the
+      Overview's `/metrics` as-of admits a failed refresh.
+- [x] NIT: card-layout labels at 320 px (`data-label`); `loading` line corrected in the PR (not
+      implemented: see PR); classify()'s `busy` for a malformed body disclosed, not changed.
+- [x] Found while fixing B: a gateway `not_running` on `/metrics` read "The decision worker is not
+      running" for any worker; on the gateway reads it now names the worker.
+- [x] Mutation proofs A–E; gates; screenshots (hung stale, 320 px) from `:2104` via a local
+      hanging proxy; PR body: disproved claims removed, "second review" section.
+- Result: 25 dashboard mutants, all killed (A1–A6, E1–E3, B1–B4, D1–D3, C1–C6, C5b, N1, N2) plus
+  the status-0 no-retry guard. 283 tests. Every new commit builds, lints and passes on its own.
+- Landing chunk 116.00 kB gzip + css 4.56 + html 0.28 = 120.84 kB (budget 170).

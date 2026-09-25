@@ -4,10 +4,7 @@ import { READ_DEADLINE_MS } from "../api/client";
 /** Why the answer on screen is not current: its refresh failed, or it has gone unanswered. */
 export type Staleness = "failed" | "late" | null;
 
-/**
- * Failure alone cannot mark a hung refresh, which never fails. So an answer is also stale once it
- * is older than one missed poll plus a whole read deadline. Not while hidden: nothing polls then.
- */
+/** A hung refresh never fails, so age marks it too: one missed poll plus a whole read deadline. */
 export function useStaleness(
   query: { dataUpdatedAt: number; isError: boolean },
   interval: number | false,

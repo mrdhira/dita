@@ -3,11 +3,7 @@ import { ApiError, type Problem } from "../api/client";
 const isGatewayRead = (route: string | undefined) =>
   route === "/workers" || route?.startsWith("/metrics/") === true;
 
-/**
- * The console's reads of the gateway (/workers, /metrics/…). The gateway answers them with 200 or
- * its own JSON naming the worker, so a 5xx that names no worker came from the gateway or something
- * in front of it, and says nothing about any worker or its model.
- */
+/** On these reads the gateway names the worker it blames, so a 5xx naming none is not a worker's. */
 function describeRead(route: string, status: number, problem: Problem) {
   if (problem.error_type === "NoAnswer") {
     return {
@@ -28,9 +24,8 @@ function describeRead(route: string, status: number, problem: Problem) {
 }
 
 /**
- * What a person should read for a failed request. Each status is measured behaviour, not a
- * generic failure. A 503 with no gateway reason is the worker itself saying it has no model only
- * on a pass-through route (Try it, decide); on the console's own reads it is never read that way.
+ * What a person should read for a failed request. A reasonless 503 means "no model" only on a
+ * pass-through route (Try it, decide), never on the console's own reads of the gateway.
  */
 export function describeError(error: unknown): { title: string; detail: string } {
   if (!(error instanceof ApiError)) {
@@ -111,7 +106,7 @@ export function describeError(error: unknown): { title: string; detail: string }
   }
 }
 
-/** Never retry a 4xx: the request is the user's to fix. A 5xx gets two more tries. */
+/** No retry for a 4xx, nor for a read with no answer (0): its next poll is the retry. */
 export function shouldRetry(failureCount: number, error: unknown): boolean {
   if (error instanceof ApiError && error.status < 500) return false;
   return failureCount < 2;

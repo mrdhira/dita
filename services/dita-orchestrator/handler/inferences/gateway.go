@@ -117,6 +117,29 @@ func WriteUnavailable(w http.ResponseWriter, ctx context.Context, worker Worker,
 	return reason
 }
 
+// RelayFailure answers a worker's non-200 with its status. An error object the worker wrote
+// passes unchanged; anything else, such as Python's send_error HTML page, becomes the
+// orchestrator's own JSON naming the worker, so no client has to guess whose a bare page is.
+func RelayFailure(w http.ResponseWriter, worker Worker, status int, contentType string, body []byte) {
+	var answer struct {
+		Error *string `json:"error"`
+	}
+	if json.Unmarshal(body, &answer) == nil && answer.Error != nil {
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+		return
+	}
+	kind, _, _ := strings.Cut(contentType, ";")
+	if kind = strings.TrimSpace(kind); kind == "" {
+		kind = "untyped"
+	}
+	writeJSON(w, status, failure{Error: fmt.Sprintf("%s answered %d with a body of type %s, not a JSON error", worker.Name, status, kind),
+		ErrorType: "Backend", Worker: worker.Name})
+}
+
 // failure is TEI's error body, {error, error_type}, plus which worker and why, so a TEI
 // client parses it and a person can read it.
 type failure struct {

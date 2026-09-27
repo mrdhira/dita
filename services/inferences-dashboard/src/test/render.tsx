@@ -7,19 +7,31 @@ import { makeQueryClient } from "../App";
 
 /** fetch, stubbed at the seam: each call is answered by the first matching route. */
 export function stubApi(
-  routes: Record<string, (body: unknown) => { status: number; body: unknown }>,
+  routes: Record<
+    string,
+    (body: unknown) => { status: number; body: unknown; headers?: Record<string, string> }
+  >,
 ) {
   const calls: { method: string; path: string; body: unknown }[] = [];
   const fetchStub = vi.fn((input: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const path = input.replace("/api/inferences", "");
-    const body: unknown = init?.body ? JSON.parse(init.body as string) : undefined;
+    const raw = init?.body as string | undefined;
+    let body: unknown = raw;
+    try {
+      body = raw ? JSON.parse(raw) : undefined;
+    } catch {
+      // Try-it sends what the person typed; a body that is not JSON is recorded as sent.
+    }
     calls.push({ method, path, body });
     const handler = routes[`${method} ${path}`];
     const answer = handler
       ? handler(body)
       : { status: 404, body: { error: `no stub for ${method} ${path}` } };
-    return Promise.resolve(new Response(JSON.stringify(answer.body), { status: answer.status }));
+    const text = typeof answer.body === "string" ? answer.body : JSON.stringify(answer.body);
+    return Promise.resolve(
+      new Response(text, { status: answer.status, headers: answer.headers ?? {} }),
+    );
   });
   vi.stubGlobal("fetch", fetchStub);
   return calls;

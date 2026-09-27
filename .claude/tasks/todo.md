@@ -1,3 +1,43 @@
+# Console release 1 (`.claude/tasks/console-r1-spec.md`), read-only
+
+## Decisions up front
+- **Route shape follows the design, not the spec**: `GET /api/inferences/metrics/{service}` (design §9).
+  The spec's `/api/inferences/{service}/metrics` also overlaps `GET /api/inferences/decisions/{id}`
+  on `/api/inferences/decisions/metrics`, which Go's ServeMux refuses at registration.
+- Service ids are `embedding`, `reranker`, `system-one`; the intended-fleet list (ocr/stt/tts) is static.
+- Existing Decide/History/Templates/Eval stay, as a secondary "decision workbench" row; the five
+  top-level entries are the design's.
+- Polling: fleet 5 s, detail 10 s, metrics 30 s, all gated on `document.visibilityState`.
+
+## Steps
+- [x] 1. Gateway: metrics pass-through + tests (verbatim, unknown 404 shape, POST 405 Allow: GET).
+- [x] 2. SPA: status vocabulary, visibility hook, metrics parser (fixed names, no percentile).
+- [x] 3. SPA: Fleet (`/`), service detail tabs, thin Models/Activity/Jobs/Settings, lazy routes.
+- [x] 4. Tests for each behaviour; one guard proven by mutation.
+- [x] 5. Gates: lint, vitest, build (chunk sizes), go test; screenshots against real data.
+- [ ] 6. Push, open the PR against main, leave it open.
+
+## Review
+- Gates clean: lint, 210 vitest, build (landing chunk 113.38 kB gzip, from 155.04 on main), go test.
+- Mutations: 5 mutants, all caught. The hidden-tab guard is held twice (ours and React Query's
+  focus manager); the fetch-count assertion bites only when both are removed, shown on purpose.
+- Found in the screenshots, not the tests: `dita_worker_ops_total` counts DIP socket ops (mostly
+  `readyz` probes), not HTTP requests. Relabelled; the Overview counts inferences from the
+  `infer_duration` histogram's `_count`.
+- Not done: dark mode (§13), Lighthouse (§14), per-container Dozzle deep link.
+
+## Review fixes (`.claude/tasks/console-r1-review-fixes.md`, review at `/tmp/console_review.md`)
+- [x] MUST 1: `residentOf` — "none resident" only on `no_model`; a missing /info is "unknown".
+- [x] MUST 2: stale warning tested; a failed refresh marks the badge `stale` and says since when.
+- [x] SHOULD 3: a non-`text/plain` 200, or one with no recognised series, is an error.
+- [x] SHOULD 4: Go — query recorded and asserted, 502 `too_large` over the bound, non-200 pinned.
+- [x] SHOULD 5: provenance reads true; drift reported, nothing redeployed.
+- [x] SHOULD 6: only the paused/failed notes are a live region.
+- [x] NITs: strip vocabulary, footnote, `0.0 s`, Overview as-of, Models identity, resident-for column, untested strings, 10 s / 30 s polling.
+- Also: `describeError` called any 503 "no model loaded", including gateway `unreachable`.
+- Mutation: 5 Go mutants (A, B1, B2, C, D) and 19 dashboard mutants (incl. the reviewer's E, F, G), all killed.
+- Landing chunk 115.31 kB gzip (was 113.38): Fleet's resident-for column pulls the metrics parser in.
+
 # Addendum: audit findings (`/mnt/data/workspaces/hardening-lane-b-addendum.md`), in priority order
 Supersedes the Caddy `header_up` design and the "same wording" pre-check below.
 
@@ -249,3 +289,61 @@ Baseline before any change: `pnpm vitest run --maxWorkers=2` → 12 files, 96 te
 - [x] A3. 401 / 403 / 415 as sentences; `problem+json` and `{error}` both read (`toProblem`).
 - [x] A4. Caddyfile comment and the doc state the LAN deployment; `limit=50` already at the ceiling.
 - [x] A5. Audit finding 4, dashboard side: `answers: null` shown as unreadable, no correction form.
+
+## Review round two (`.claude/tasks/console-r1-review2-fixes.md`, report at `.claude/review/report.md`)
+- [x] A. Staleness is failure **or age**: `useStaleness` (failed | late | null), budget 2 × interval +
+      read deadline; polled reads (`/workers`, `/metrics`) carry React Query's signal plus a 10 s
+      deadline and end as `NoAnswer`. Fleet rows, service header, strip, Overview and Metrics.
+- [x] B. `describeError` knows the route: on `/workers` and `/metrics/*` a reasonless 5xx is "the
+      gateway, or something in front of it", never "no model". Docstring true for every route.
+- [x] C. A worker page must carry `dita_worker_uptime_seconds`; a family with no `# TYPE` line is
+      unknown, not "none since the last restart" (Metrics tab and Overview figures).
+- [x] D. 502 on `/workers` / `/metrics` without a `worker` field gets the gateway title; `NotMetrics`
+      gets its own title.
+- [x] E. Tests: Fleet resident-for `—` after a failed `/metrics`; an `extra` row goes stale; the
+      Overview's `/metrics` as-of admits a failed refresh.
+- [x] NIT: card-layout labels at 320 px (`data-label`); `loading` line corrected in the PR (not
+      implemented: see PR); classify()'s `busy` for a malformed body disclosed, not changed.
+- [x] Found while fixing B: a gateway `not_running` on `/metrics` read "The decision worker is not
+      running" for any worker; on the gateway reads it now names the worker.
+- [x] Mutation proofs A–E; gates; screenshots (hung stale, 320 px) from `:2104` via a local
+      hanging proxy; PR body: disproved claims removed, "second review" section.
+- Result: 25 dashboard mutants, all killed (A1–A6, E1–E3, B1–B4, D1–D3, C1–C6, C5b, N1, N2) plus
+  the status-0 no-retry guard. 283 tests. Every new commit builds, lints and passes on its own.
+- Landing chunk 116.00 kB gzip + css 4.56 + html 0.28 = 120.84 kB (budget 170).
+
+## Review round three (`.claude/tasks/console-r1-round3-fixes.md`, report at `.claude/review/report3.md`)
+- [x] MUST 1. `describeError` reads the **body**: a 5xx without the orchestrator's or a worker's JSON
+      (`error_type`, `worker`, `reason`) is "the orchestrator (or, on its reads, the gateway), or
+      something in front of it, answered N" on every route. "No model" only from a body that
+      carries it. Docstring and PR line corrected. Tests: History and Templates (empty 502,
+      reasonless 503), Decide (the worker's own 503).
+- [x] SHOULD 2. `READ_DEADLINE_MS = 2 × GATEWAY_PROBE_TIMEOUT_MS + margin` (15 s); a contract test
+      reads `DefaultProbeTimeout` from the Go source; a behaviour test accepts a 10.3 s answer (2 probes + 0.3 s).
+      Hang tests derive their times from the constants.
+- [x] SHOULD 3. Test: no "late" while the tab is hidden.
+- [x] NIT. A hung read (`NoAnswer`) reads "has not answered", not "failed". PR: three disproved claims
+      corrected, "Third review" section, metrics-parsing weaknesses disclosed, phone-label wording
+      narrowed.
+- Result: 11 new mutants, all killed (M1a–M1d, S2a–S2d, S3, and two on the NoAnswer mapping; the PR's
+  12th row is S2a re-run with its precondition removed, not a new mutant),
+  plus the behaviour test seen red with its precondition removed. 296 tests. Every new commit
+  builds and lints on its own; one run at `ce5f00d` showed "1 failed" that did not reproduce in
+  18 further runs, and its name was not captured.
+- Screenshot 8 retaken: a hang now reads "has not answered".
+
+## Review round four (`.claude/tasks/console-r1-round4-fixes.md`, report at `.claude/review/report4.md`)
+- [x] MUST A. Option 1: `inferences.RelayFailure` answers both relays (`/decisions`, `/metrics`):
+      a worker's own `{"error": ...}` passes unchanged; anything else keeps the status and becomes
+      `{error, error_type: "Backend", worker}`. The console reads that as "<worker> answered N".
+      `errors.ts` comments corrected.
+- [x] SHOULD B. `TestWorkersProbesEveryWorkerAtOnce`: three slow workers, 300 ms probe, total within
+      2.5 probes. Sequential probing (X1) fails at 1.36 s.
+- [x] SHOULD C. `asyncUtilTimeout: 5_000`, `testTimeout: 15_000`, every `vi.waitFor` → `waitFor`,
+      `harness.test.tsx`. Four suites at once x 3: old 5/12 failed (DecidePage first test), new 0/12;
+      six at once x 2: new 0/12.
+- [x] NITs: route/body comment; real vitest transcript; round-three counts re-run on the full suite
+      at `a42bc85`; raw-HTML detail and `config.go` density disclosed.
+- Mistake: a zsh scalar holding five paths was not word-split, so the backup `cp` failed while
+  `git checkout`/`rm` succeeded and removed the uncommitted round-four test-config changes; they
+  were re-applied from the recorded edits and re-verified (21 files, 300 tests) before any commit.

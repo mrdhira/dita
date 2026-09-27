@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -23,7 +24,9 @@ import (
 // status, headers and body.
 type upstream struct {
 	mu       sync.Mutex
+	method   string
 	path     string
+	query    string
 	body     []byte
 	length   int64
 	status   int
@@ -35,7 +38,7 @@ type upstream struct {
 func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	u.mu.Lock()
-	u.path, u.body, u.length = r.URL.Path, body, r.ContentLength
+	u.method, u.path, u.query, u.body, u.length = r.Method, r.URL.Path, r.URL.RawQuery, body, r.ContentLength
 	u.mu.Unlock()
 	if u.block != nil {
 		<-u.block
@@ -82,6 +85,7 @@ func gatewayFor(t *testing.T, timeout time.Duration, workers map[string]*url.URL
 	mux.HandleFunc("POST /api/inferences/decide", g.Decide)
 	mux.HandleFunc("GET /api/inferences/workers", g.Workers)
 	mux.HandleFunc("GET /api/inferences/health", g.Health)
+	mux.HandleFunc("GET /api/inferences/metrics/{service}", g.Metrics)
 	return mux
 }
 
@@ -464,5 +468,197 @@ func TestABodyWithoutALengthIsBufferedOnlyUpToTheCap(t *testing.T) {
 				t.Fatalf("%d bytes without a length: %d, worker reached %v", c.size, rec.Code, reached)
 			}
 		})
+	}
+}
+
+func TestMetricsPassesTheWorkersPageThroughVerbatim(t *testing.T) {
+	page := []byte("# HELP dita_worker_ops_total DIP requests handled.\n# TYPE dita_worker_ops_total counter\n" +
+		"dita_worker_ops_total{worker=\"inferences-reranker\",op=\"infer\",outcome=\"ok\"} 24\n" +
+		"dita_worker_infer_duration_seconds_bucket{le=\"+Inf\"}   24\n")
+	cases := []struct{ service, worker string }{
+		{"embedding", Embedding},
+		{"reranker", Reranker},
+		{"system-one", SystemOne},
+	}
+	for _, c := range cases {
+		t.Run(c.service, func(t *testing.T) {
+			up := &upstream{status: 200, response: page, headers: map[string]string{"Content-Type": "text/plain"}}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{c.worker: start(t, up)})
+
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/"+c.service+"?path=/info", nil)
+
+			if rec.Code != 200 || !bytes.Equal(rec.Body.Bytes(), page) {
+				t.Fatalf("got %d %q, want the worker's bytes %q", rec.Code, rec.Body.Bytes(), page)
+			}
+			if got := rec.Header().Get("Content-Type"); got != MetricsContentType {
+				t.Fatalf("content type %q, want %q", got, MetricsContentType)
+			}
+			if up.method != http.MethodGet || up.path != "/metrics" || up.query != "" {
+				t.Fatalf("the worker was asked %s %q ?%q; only GET /metrics is reachable", up.method, up.path, up.query)
+			}
+		})
+	}
+}
+
+func TestMetricsForAServiceItDoesNotKnowIsTheOneErrorShape(t *testing.T) {
+	up := &upstream{status: 200, response: []byte("x 1\n")}
+	u := start(t, up)
+	gw := gatewayFor(t, time.Minute, map[string]*url.URL{Embedding: u, Reranker: u, SystemOne: u})
+	for _, service := range []string{"ocr", "inferences-embedding", "embed", "%2e%2e%2finfo"} {
+		t.Run(service, func(t *testing.T) {
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/"+service, nil)
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 404 ||
+				body["error_type"] != "NotFound" || body["error"] == "" || len(body) != 2 {
+				t.Fatalf("got %d %q (%v), want 404 {error, error_type: NotFound}", rec.Code, rec.Body, err)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("content type %q", got)
+			}
+		})
+	}
+	if up.path != "" {
+		t.Fatalf("an unknown service reached a worker at %q", up.path)
+	}
+}
+
+func TestMetricsFromAWorkerThatIsDown(t *testing.T) {
+	gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: closedURL(t)})
+	rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+	var got failure
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 503 ||
+		got.Reason != "not_running" || got.ErrorType != "Unhealthy" || got.Worker != Reranker {
+		t.Fatalf("got %d %q (%v), want 503 not_running", rec.Code, rec.Body, err)
+	}
+}
+
+func TestMetricsKeepsAWorkersFailureAFailure(t *testing.T) {
+	sendError := "<!DOCTYPE HTML>\n<html><body><h1>Error response</h1><p>Error code: 404</p></body></html>\n"
+	own := `{"error":"no model is loaded","error_type":"Unhealthy"}`
+	cases := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+		verbatim    bool
+	}{
+		{"404: the worker's send_error HTML page, as JSON naming the worker", 404, "text/html;charset=utf-8", sendError, false},
+		{"500 as plain text, as JSON naming the worker", 500, "text/plain; charset=utf-8", "boom", false},
+		{"500 with an empty body, as JSON naming the worker", 500, "", "", false},
+		{"502: JSON that is not an error object, as JSON naming the worker", 502, "application/json", `{"status":"down"}`, false},
+		{"503: the worker's own JSON error, unchanged", 503, "application/json", own, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			up := &upstream{status: c.status, response: []byte(c.body), headers: map[string]string{"Content-Type": c.contentType}}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, up)})
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+			if rec.Code != c.status {
+				t.Fatalf("status %d, want the worker's %d", rec.Code, c.status)
+			}
+			if got := rec.Header().Get("Content-Type"); got == MetricsContentType || !strings.HasPrefix(got, "application/json") {
+				t.Fatalf("content type %q, want JSON and never %q", got, MetricsContentType)
+			}
+			if c.verbatim {
+				if rec.Body.String() != c.body {
+					t.Fatalf("got %q, want the worker's own error %q unchanged", rec.Body, c.body)
+				}
+				return
+			}
+			var got failure
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.ErrorType != "Backend" || got.Worker != Reranker ||
+				!strings.Contains(got.Error, fmt.Sprintf("answered %d", c.status)) || strings.Contains(rec.Body.String(), "<") {
+				t.Fatalf("got %q (%v), want the orchestrator's JSON naming %s and its %d, with none of the page", rec.Body, err, Reranker, c.status)
+			}
+		})
+	}
+}
+
+func TestMetricsRefusesAPageOverTheBound(t *testing.T) {
+	cases := []struct {
+		name string
+		size int
+		want int
+	}{
+		{"at the bound", maxMetricsBody, 200},
+		{"one byte over", maxMetricsBody + 1, 502},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			page := bytes.Repeat([]byte("x"), c.size)
+			up := &upstream{status: 200, response: page}
+			gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, up)})
+			rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+			if rec.Code != c.want {
+				t.Fatalf("status %d for a %d-byte page, want %d", rec.Code, c.size, c.want)
+			}
+			if c.want == 200 {
+				if rec.Body.Len() != c.size {
+					t.Fatalf("served %d of %d bytes", rec.Body.Len(), c.size)
+				}
+				return
+			}
+			var got failure
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Reason != "too_large" ||
+				got.Worker != Reranker || !strings.Contains(got.Error, "exceeds") {
+				t.Fatalf("got %q (%v), want a too_large refusal naming the worker", rec.Body, err)
+			}
+		})
+	}
+}
+
+func TestMetricsStopsReadingAnEndlessPageAtTheBound(t *testing.T) {
+	endless := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := bytes.Repeat([]byte("x"), 32<<10)
+		for {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	})
+	gw := gatewayFor(t, time.Minute, map[string]*url.URL{Reranker: start(t, endless)})
+	rec := do(t, gw, http.MethodGet, "/api/inferences/metrics/reranker", nil)
+	var got failure
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 502 || got.Reason != "too_large" {
+		t.Fatalf("got %d %q (%v), want 502 too_large: reading must stop at the bound, not run to the probe timeout", rec.Code, rec.Body, err)
+	}
+}
+
+func TestWorkersProbesEveryWorkerAtOnce(t *testing.T) {
+	const probe = 300 * time.Millisecond
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			time.Sleep(probe / 2)
+			w.WriteHeader(http.StatusOK)
+		case "/info":
+			<-r.Context().Done()
+		}
+	})
+	cfg := Config{Timeout: time.Minute, ProbeTimeout: probe}
+	for _, name := range []string{Embedding, Reranker, SystemOne} {
+		cfg.Workers = append(cfg.Workers, Worker{Name: name, URL: start(t, slow)})
+	}
+	g := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rec := httptest.NewRecorder()
+	began := time.Now()
+	g.Workers(rec, httptest.NewRequest(http.MethodGet, "/api/inferences/workers", nil))
+	took := time.Since(began)
+
+	var doc struct{ Workers []report }
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || len(doc.Workers) != 3 {
+		t.Fatalf("got %q (%v), want three reports", rec.Body, err)
+	}
+	for _, r := range doc.Workers {
+		if r.State != "ready" || string(r.Info) != "null" {
+			t.Fatalf("%s: state %q info %s, want ready with /info timed out", r.Name, r.State, r.Info)
+		}
+	}
+	if took < probe {
+		t.Fatalf("took %s: each worker's /info should have run out its %s probe", took, probe)
+	}
+	if limit := 2*probe + probe/2; took > limit {
+		t.Fatalf("took %s for three workers, over %s: the dashboard's read deadline assumes each "+
+			"GET /workers costs about 2 × ProbeTimeout, which holds only if workers are probed at once", took, limit)
 	}
 }

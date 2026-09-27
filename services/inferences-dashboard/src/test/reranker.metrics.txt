@@ -1,0 +1,71 @@
+# HELP dita_worker_ops_total DIP requests handled, by op and outcome.
+# TYPE dita_worker_ops_total counter
+dita_worker_ops_total{worker="inferences-reranker",op="readyz",outcome="ok"} 141
+# HELP dita_worker_errors_total Failed requests by DIP error code.
+# TYPE dita_worker_errors_total counter
+# HELP dita_worker_model_loads_total Successful model loads, by model.
+# TYPE dita_worker_model_loads_total counter
+dita_worker_model_loads_total{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 1
+# HELP dita_worker_model_evictions_total Loads that displaced a resident model. One model is resident at a time.
+# TYPE dita_worker_model_evictions_total counter
+dita_worker_model_evictions_total{worker="inferences-reranker"} 0
+# HELP dita_worker_fetched_bytes_total Model bytes downloaded and digest-verified.
+# TYPE dita_worker_fetched_bytes_total counter
+dita_worker_fetched_bytes_total{worker="inferences-reranker"} 153327747
+# HELP dita_worker_fetched_files_total Model files downloaded and digest-verified.
+# TYPE dita_worker_fetched_files_total counter
+dita_worker_fetched_files_total{worker="inferences-reranker"} 2
+# HELP dita_worker_connections_total Socket connections, by whether they were accepted or refused at the cap.
+# TYPE dita_worker_connections_total counter
+dita_worker_connections_total{worker="inferences-reranker",outcome="accepted"} 141
+dita_worker_connections_total{worker="inferences-reranker",outcome="refused"} 0
+# HELP dita_worker_load_duration_seconds Model load duration, including download and session init.
+# TYPE dita_worker_load_duration_seconds histogram
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="0.1"} 0
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="0.5"} 0
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="1.0"} 0
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="2.5"} 0
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="5.0"} 1
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="10.0"} 1
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="30.0"} 1
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="60.0"} 1
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="300.0"} 1
+dita_worker_load_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="+Inf"} 1
+dita_worker_load_duration_seconds_sum{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 4.1412
+dita_worker_load_duration_seconds_count{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 1
+# HELP dita_worker_infer_duration_seconds Inference duration, excluding load.
+# TYPE dita_worker_infer_duration_seconds histogram
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="0.05"} 2
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="0.1"} 3
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="0.25"} 4
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="0.5"} 4
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="1.0"} 11
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="2.5"} 16
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="5.0"} 21
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="10.0"} 24
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="30.0"} 24
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="60.0"} 24
+dita_worker_infer_duration_seconds_bucket{worker="inferences-reranker",model="jina-reranker-v1-turbo-en",le="+Inf"} 24
+dita_worker_infer_duration_seconds_sum{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 49.3837
+dita_worker_infer_duration_seconds_count{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 24
+# HELP dita_worker_model_resident 1 when a model is resident and able to answer infer right now.
+# TYPE dita_worker_model_resident gauge
+dita_worker_model_resident{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 1
+# HELP dita_worker_model_resident_seconds How long the resident model has been loaded.
+# TYPE dita_worker_model_resident_seconds gauge
+dita_worker_model_resident_seconds{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 4333.608
+# HELP dita_worker_model_loading 1 while a model is being fetched. A load in flight is progress, not a wedge.
+# TYPE dita_worker_model_loading gauge
+dita_worker_model_loading{worker="inferences-reranker",model="jina-reranker-v1-turbo-en"} 0
+# HELP dita_worker_uptime_seconds Process uptime.
+# TYPE dita_worker_uptime_seconds gauge
+dita_worker_uptime_seconds{worker="inferences-reranker"} 4337.75
+# HELP process_resident_memory_bytes Resident set size, right now.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes{worker="inferences-reranker"} 333955072
+# HELP process_resident_memory_peak_bytes Peak resident set size since the process started.
+# TYPE process_resident_memory_peak_bytes gauge
+process_resident_memory_peak_bytes{worker="inferences-reranker"} 405106688
+# HELP process_cpu_seconds_total User plus system CPU time.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total{worker="inferences-reranker"} 164.482

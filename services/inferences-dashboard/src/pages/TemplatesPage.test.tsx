@@ -1,6 +1,6 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderAt, stubApi } from "../test/render";
 import { TemplatesPage } from "./TemplatesPage";
 
@@ -243,4 +243,27 @@ describe("TemplatesPage", () => {
         "questions.0.options: the editor's own reason",
     );
   });
+});
+
+describe("TemplatesPage: an answer no server wrote is not a worker's", () => {
+  for (const [what, status, body] of [
+    ["Caddy's empty 502, the orchestrator down", 502, ""],
+    ["a proxy's bare 503", 503, "Service Unavailable"],
+  ] as const) {
+    it(what, async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        stubApi({ "GET /schemas": () => ({ status, body }) });
+        renderAt("/templates", "/templates", <TemplatesPage />);
+        await act(() => vi.advanceTimersByTimeAsync(5_000));
+        const banner = screen.getByRole("alert").textContent;
+        expect(banner).toContain(
+          `The orchestrator, or something in front of it, answered ${status}`,
+        );
+        expect(banner).not.toMatch(/no model loaded|The worker/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
 });

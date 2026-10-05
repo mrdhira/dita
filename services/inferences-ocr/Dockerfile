@@ -3,7 +3,7 @@
 # The OS suffix is pinned because the apt names below are Debian-release specific.
 FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
 
-FROM python:3.14.6-slim-trixie AS deps
+FROM python:3.14.7-slim-trixie AS deps
 
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /workspace
@@ -21,7 +21,7 @@ RUN uv export --package inferences-ocr --locked --no-emit-project \
         --no-emit-package dip --no-emit-package worker \
         --no-default-groups --no-cache -o /tmp/requirements.txt
 
-FROM python:3.14.6-slim-trixie
+FROM python:3.14.7-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

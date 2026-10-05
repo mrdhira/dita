@@ -18,7 +18,7 @@ textinfer = { workspace = true }
 torch = { index = "pytorch-cpu" }
 
 [dependency-groups]
-dev = ["coverage>=7.16.1,<8"]
+dev = ["coverage>=7.16.2,<8"]
 # The image's builder stage only: it exports the encoder to ONNX and proves the graph against
 # torch. Never a default group, so neither the runtime image nor the test env ever has torch.
 export = [

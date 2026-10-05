@@ -17,7 +17,7 @@ worker = { workspace = true }
 textinfer = { workspace = true }
 
 [dependency-groups]
-dev = ["coverage>=7.16.1,<8"]
+dev = ["coverage>=7.16.2,<8"]
 
 [tool.uv]
 # An application, not a library: uv installs its dependencies but never builds or

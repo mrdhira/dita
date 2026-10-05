@@ -16,7 +16,7 @@ dependencies = [
 worker = { workspace = true }
 
 [dependency-groups]
-dev = ["coverage>=7.16.1,<8"]
+dev = ["coverage>=7.16.2,<8"]
 
 [build-system]
 requires = ["hatchling"]

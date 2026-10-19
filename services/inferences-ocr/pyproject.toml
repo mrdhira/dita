@@ -9,7 +9,7 @@ dependencies = [
     "worker",
     "rapidocr>=3.9.2,<4",
     "onnxruntime>=1.30,<2",
-    "numpy>=2.5,<3",
+    "numpy>=2.5.4,<3",
     "pillow>=12.3,<13",
     "pyyaml>=6.0.3,<7",
     # Not opencv-python-headless: rapidocr needs the non-headless distribution, and asking
